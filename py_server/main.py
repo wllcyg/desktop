@@ -80,7 +80,7 @@ def _save_or_encode_result(img: np.ndarray, output_path: str = None, return_base
 # ==================== JSON-RPC 接口处理函数 ====================
 
 def handle_ping(params: dict) -> dict:
-    return {"status": "ok", "version": "0.1.1"}
+    return {"status": "ok", "version": "0.1.2"}
 
 
 def handle_auto_remove_watermark(params: dict) -> dict:
@@ -293,7 +293,7 @@ METHODS = {
 
 
 def main():
-    ready_msg = json.dumps({"jsonrpc": "2.0", "event": "ready", "version": "0.1.1"}, ensure_ascii=False)
+    ready_msg = json.dumps({"jsonrpc": "2.0", "event": "ready", "version": "0.1.2"}, ensure_ascii=False)
     sys.stdout.write(ready_msg + "\n")
     sys.stdout.flush()
 
