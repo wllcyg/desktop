@@ -83,13 +83,13 @@ const go = (path: string) => {
     <!-- 欢迎 Banner -->
     <div class="welcome-banner">
       <div class="banner-content">
-        <h1 class="banner-title">教师工具箱</h1>
+        <h1 class="banner-title">工具箱</h1>
         <p class="banner-subtitle">
-          面向初中化学老师日常备课、批改、制卷与学情统计的一站式高效桌面助手
+          一站式高效桌面小工具集合：图片/文档处理、批量办公、数据统计与学科工具
         </p>
       </div>
       <div class="banner-tag">
-        <n-tag type="success" round>初中化学专属定制</n-tag>
+        <n-tag type="success" round>高效 · 简洁 · 开箱即用</n-tag>
       </div>
     </div>
 

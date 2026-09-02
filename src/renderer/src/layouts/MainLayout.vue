@@ -165,8 +165,8 @@ const menuOptions: MenuOption[] = [
           <span class="logo-flask">⚗️</span>
         </div>
         <div v-if="!collapsed" class="brand-info">
-          <span class="brand-title">教师工具箱</span>
-          <span class="brand-subtitle">初中化学备课助手</span>
+          <span class="brand-title">工具箱</span>
+          <span class="brand-subtitle">高效桌面助手</span>
         </div>
       </div>
 
