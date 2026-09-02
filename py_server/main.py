@@ -1,20 +1,20 @@
 """
-工具箱 Python 核心服务
+工具箱 Python 核心服务 (标准输入/输出 JSON-RPC 管道模式)
 
-本地轻量 HTTP 微服务，为 Electron 桌面应用提供图片处理、文档转换等核心算法能力。
-服务仅绑定在 127.0.0.1 本地回环，不对外暴露。
+与 Electron 主进程通过 stdin/stdout 进行进程管道通信：
+1. 零网络端口占用，零防火墙拦截风险
+2. 零 Web 框架依赖 (无需 FastAPI/Uvicorn)，打包体积极小
+3. 进程常驻内存，模型与库只加载一次，毫秒级响应
 """
 
+import sys
+import json
+import os
 import io
 import base64
 import traceback
-
 import cv2
 import numpy as np
-from PIL import Image
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
 
 from services.watermark_service import (
     remove_light_watermark,
@@ -22,143 +22,166 @@ from services.watermark_service import (
     combined_remove,
 )
 
-app = FastAPI(title="工具箱核心服务", version="0.1.0")
 
-# 允许来自 Electron 渲染进程的跨域请求
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+def _read_image(source: str) -> np.ndarray:
+    """
+    智能读取图片：支持本地绝对文件路径或 base64 字符串
+    """
+    if os.path.isfile(source):
+        # 使用 cv2.imdecode 避免 Windows 中文路径乱码问题
+        with open(source, "rb") as f:
+            file_bytes = f.read()
+        nparr = np.frombuffer(file_bytes, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    else:
+        # 尝试作为 base64 处理
+        b64_str = source
+        if "," in b64_str:
+            b64_str = b64_str.split(",", 1)[1]
+        img_bytes = base64.b64decode(b64_str)
+        nparr = np.frombuffer(img_bytes, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-
-def _read_image_from_upload(file_bytes: bytes) -> np.ndarray:
-    """将上传的文件字节流解码为 OpenCV BGR 图像"""
-    nparr = np.frombuffer(file_bytes, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if img is None:
-        raise HTTPException(status_code=400, detail="无法解析上传的图片文件")
+        raise ValueError("无法解析图像数据")
     return img
 
 
-def _read_image_from_base64(b64_str: str) -> np.ndarray:
-    """将 base64 编码字符串解码为 OpenCV BGR 图像"""
-    # 去掉可能的 data:image/xxx;base64, 前缀
-    if "," in b64_str:
-        b64_str = b64_str.split(",", 1)[1]
-    img_bytes = base64.b64decode(b64_str)
-    return _read_image_from_upload(img_bytes)
-
-
-def _encode_image_to_png_bytes(img: np.ndarray) -> bytes:
-    """将 OpenCV 图像编码为 PNG 字节流"""
+def _save_or_encode_result(img: np.ndarray, output_path: str = None) -> dict:
+    """
+    如果指定了 output_path 则直接保存到本地文件，同时返回 base64 供前端预览
+    """
     success, buffer = cv2.imencode(".png", img)
     if not success:
-        raise HTTPException(status_code=500, detail="图片编码失败")
-    return buffer.tobytes()
+        raise RuntimeError("图像编码失败")
+
+    # 如果有指定输出文件路径，直接写入本地磁盘（支持中文路径）
+    if output_path:
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+        with open(output_path, "wb") as f:
+            f.write(buffer.tobytes())
+
+    b64_res = "data:image/png;base64," + base64.b64encode(buffer.tobytes()).decode("utf-8")
+    return {
+        "output_path": output_path,
+        "image_base64": b64_res,
+        "width": img.shape[1],
+        "height": img.shape[0],
+    }
 
 
-@app.get("/api/health")
-async def health_check():
-    """健康检查接口，供 Electron 主进程探测服务是否就绪"""
-    return {"status": "ok", "service": "toolbox-py-server", "version": "0.1.0"}
+# ==================== 接口方法注册表 ====================
+
+def handle_ping(params: dict) -> dict:
+    return {"status": "ok", "version": "0.1.0"}
 
 
-@app.post("/api/watermark/remove-tile")
-async def remove_tile_watermark(
-    image: UploadFile = File(..., description="需要去水印的图片文件"),
-    threshold: int = Form(200, description="灰度阈值 (0-255)，越小越激进"),
-    contrast: float = Form(1.5, description="对比度增强倍数"),
-    denoise: bool = Form(True, description="是否降噪平滑"),
-    mode: str = Form("binary", description="处理模式: binary / adaptive / color_filter"),
-):
-    """
-    去除试卷/课件平铺浅色文字水印
+def handle_remove_tile_watermark(params: dict) -> dict:
+    input_source = params["input"]
+    output_path = params.get("output_path")
+    threshold = int(params.get("threshold", 200))
+    contrast = float(params.get("contrast", 1.5))
+    denoise = bool(params.get("denoise", True))
+    mode = params.get("mode", "binary")
 
-    适用场景：下载的试卷、教辅课件上大面积斜向重复的浅灰/浅蓝色文字水印。
-    """
-    try:
-        file_bytes = await image.read()
-        img = _read_image_from_upload(file_bytes)
-        result = remove_light_watermark(img, threshold, contrast, denoise, mode)
-        png_bytes = _encode_image_to_png_bytes(result)
-        return Response(content=png_bytes, media_type="image/png")
-    except HTTPException:
-        raise
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"去水印处理失败: {str(e)}")
+    img = _read_image(input_source)
+    result = remove_light_watermark(img, threshold, contrast, denoise, mode)
+    return _save_or_encode_result(result, output_path)
 
 
-@app.post("/api/watermark/inpaint")
-async def inpaint_watermark(
-    image: UploadFile = File(..., description="原始图片文件"),
-    mask: UploadFile = File(..., description="掩膜图片 (白色=需修补区域)"),
-    radius: int = Form(5, description="修补半径 (1-20)"),
-    method: str = Form("telea", description="修补算法: telea / ns"),
-):
-    """
-    交互式蒙版修补去水印
+def handle_inpaint_watermark(params: dict) -> dict:
+    input_source = params["input"]
+    mask_source = params["mask"]
+    output_path = params.get("output_path")
+    radius = int(params.get("radius", 5))
+    method = params.get("method", "telea")
 
-    适用场景：用户在前端用画笔涂抹标记的 LOGO、印章、二维码等局部水印区域。
-    """
-    try:
-        img_bytes = await image.read()
-        mask_bytes = await mask.read()
+    img = _read_image(input_source)
+    mask = _read_image(mask_source)
 
-        img = _read_image_from_upload(img_bytes)
-        mask_img = _read_image_from_upload(mask_bytes)
-
-        result = inpaint_with_mask(img, mask_img, radius, method)
-        png_bytes = _encode_image_to_png_bytes(result)
-        return Response(content=png_bytes, media_type="image/png")
-    except HTTPException:
-        raise
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"修补处理失败: {str(e)}")
+    result = inpaint_with_mask(img, mask, radius, method)
+    return _save_or_encode_result(result, output_path)
 
 
-@app.post("/api/watermark/combined")
-async def combined_watermark_remove(
-    image: UploadFile = File(..., description="原始图片文件"),
-    mask: UploadFile = File(None, description="可选的涂抹掩膜图片"),
-    threshold: int = Form(200),
-    contrast: float = Form(1.5),
-    denoise: bool = Form(True),
-    mode: str = Form("binary"),
-    inpaint_radius: int = Form(5),
-    inpaint_method: str = Form("telea"),
-):
-    """
-    组合去水印：先全局去浅色平铺水印 → 再局部蒙版修补
+def handle_combined_watermark(params: dict) -> dict:
+    input_source = params["input"]
+    mask_source = params.get("mask")
+    output_path = params.get("output_path")
+    threshold = int(params.get("threshold", 200))
+    contrast = float(params.get("contrast", 1.5))
+    denoise = bool(params.get("denoise", True))
+    mode = params.get("mode", "binary")
+    inpaint_radius = int(params.get("inpaint_radius", 5))
+    inpaint_method = params.get("inpaint_method", "telea")
 
-    两步串联，一次请求同时清除两类水印。
-    """
-    try:
-        img_bytes = await image.read()
-        img = _read_image_from_upload(img_bytes)
+    img = _read_image(input_source)
+    mask = _read_image(mask_source) if mask_source else None
 
-        mask_img = None
-        if mask is not None:
-            mask_bytes = await mask.read()
-            if mask_bytes:
-                mask_img = _read_image_from_upload(mask_bytes)
+    result = combined_remove(
+        img, mask, threshold, contrast, denoise, mode,
+        inpaint_radius, inpaint_method,
+    )
+    return _save_or_encode_result(result, output_path)
 
-        result = combined_remove(
-            img, mask_img, threshold, contrast, denoise, mode,
-            inpaint_radius, inpaint_method,
-        )
-        png_bytes = _encode_image_to_png_bytes(result)
-        return Response(content=png_bytes, media_type="image/png")
-    except HTTPException:
-        raise
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"组合去水印失败: {str(e)}")
+
+METHODS = {
+    "ping": handle_ping,
+    "watermark.remove_tile": handle_remove_tile_watermark,
+    "watermark.inpaint": handle_inpaint_watermark,
+    "watermark.combined": handle_combined_watermark,
+}
+
+
+def main():
+    # 强制将 stdout 设置为 UTF-8 编码，避免 Windows 控制台编码问题
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stdin, "reconfigure"):
+        sys.stdin.reconfigure(encoding="utf-8")
+
+    # 发送就绪信号给 Electron 主进程
+    ready_msg = json.dumps({"jsonrpc": "2.0", "event": "ready", "version": "0.1.0"}, ensure_ascii=False)
+    sys.stdout.write(ready_msg + "\n")
+    sys.stdout.flush()
+
+    # 主事件循环：按行从 stdin 接收 JSON-RPC 请求
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+
+        req_id = None
+        try:
+            req = json.loads(line)
+            req_id = req.get("id")
+            method = req.get("method")
+            params = req.get("params", {})
+
+            if method not in METHODS:
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": {"code": -32601, "message": f"未知的处理方法: {method}"}
+                }
+            else:
+                result = METHODS[method](params)
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": result
+                }
+        except Exception as e:
+            traceback.print_exc(file=sys.stderr)
+            response = {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {"code": -32000, "message": str(e)}
+            }
+
+        # 写入 stdout 并立即 flush
+        sys.stdout.write(json.dumps(response, ensure_ascii=False) + "\n")
+        sys.stdout.flush()
 
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=18520, log_level="info")
+    main()

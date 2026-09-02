@@ -1,16 +1,14 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref } from 'vue'
 import { useMessage } from 'naive-ui'
 
 const message = useMessage()
-
-// Python 服务基础地址
-const pyBaseUrl = ref('')
 
 // 文件与图片状态
 const fileList = ref<File[]>([])
 const currentImage = ref<string | null>(null)
 const resultImage = ref<string | null>(null)
+const filePath = ref<string>('')
 const isProcessing = ref(false)
 
 // 去水印参数
@@ -24,15 +22,6 @@ const inpaintMethod = ref<string>('telea')
 // 当前操作模式
 const activeTab = ref<string>('tile')
 
-// 获取 Python 服务地址
-onMounted(async () => {
-  try {
-    pyBaseUrl.value = await window.electron.ipcRenderer.invoke('py-server:base-url')
-  } catch {
-    pyBaseUrl.value = 'http://127.0.0.1:18520'
-  }
-})
-
 // 处理文件上传
 const handleFileSelect = (files: FileList | null) => {
   if (!files || files.length === 0) return
@@ -42,6 +31,9 @@ const handleFileSelect = (files: FileList | null) => {
     return
   }
   fileList.value = [file]
+  // 获取 Electron 本地文件绝对路径（如果有）
+  filePath.value = (file as any).path || ''
+
   const reader = new FileReader()
   reader.onload = (e) => {
     currentImage.value = e.target?.result as string
@@ -68,35 +60,35 @@ const triggerFileSelect = () => {
 
 // 执行去平铺水印
 const removeTileWatermark = async () => {
-  if (!fileList.value.length) {
+  if (!currentImage.value) {
     message.warning('请先上传图片')
     return
   }
 
   isProcessing.value = true
   try {
-    const formData = new FormData()
-    formData.append('image', fileList.value[0])
-    formData.append('threshold', String(threshold.value))
-    formData.append('contrast', String(contrast.value))
-    formData.append('denoise', String(denoise.value))
-    formData.append('mode', mode.value)
+    // 优先使用本地文件路径（速度最快），否则回退到 base64
+    const inputSource = filePath.value || currentImage.value
 
-    const resp = await fetch(`${pyBaseUrl.value}/api/watermark/remove-tile`, {
-      method: 'POST',
-      body: formData
+    const res = await window.electron.ipcRenderer.invoke('py:call', {
+      method: 'watermark.remove_tile',
+      params: {
+        input: inputSource,
+        threshold: threshold.value,
+        contrast: contrast.value,
+        denoise: denoise.value,
+        mode: mode.value
+      }
     })
 
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ detail: '服务异常' }))
-      throw new Error(err.detail || '处理失败')
+    if (res?.image_base64) {
+      resultImage.value = res.image_base64
+      message.success('去水印完成')
+    } else {
+      throw new Error('未收到处理结果')
     }
-
-    const blob = await resp.blob()
-    resultImage.value = URL.createObjectURL(blob)
-    message.success('去水印完成')
   } catch (err: any) {
-    message.error(err.message || '去水印失败，请检查 Python 服务是否启动')
+    message.error(err?.message || '去水印失败，请检查 Python 依赖是否安装')
   } finally {
     isProcessing.value = false
   }
@@ -155,7 +147,7 @@ const methodOptions = [
                 <div class="param-group">
                   <div class="param-label">
                     去水印强度
-                    <n-text depth="3" class="param-hint">值越小去得越干净（可能丢失细节）</n-text>
+                    <n-text depth="3" class="param-hint">值越小去得越干净</n-text>
                   </div>
                   <n-slider v-model:value="threshold" :min="100" :max="250" :step="5" />
                   <n-input-number v-model:value="threshold" :min="100" :max="250" size="small" />
