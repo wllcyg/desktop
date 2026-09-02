@@ -185,7 +185,7 @@ const menuOptions: MenuOption[] = [
 
       <!-- 底部操作区 -->
       <div class="sidebar-footer">
-        <n-text depth="3" class="version-text">v1.0.0 MVP</n-text>
+        <n-text depth="3" class="version-text">v0.1.0 MVP</n-text>
       </div>
     </aside>
 
