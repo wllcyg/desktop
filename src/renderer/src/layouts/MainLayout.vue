@@ -1,11 +1,42 @@
 <script setup lang="ts">
-import { h, ref, computed } from 'vue'
+import { h, ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import type { MenuOption } from 'naive-ui'
-import { NTag } from 'naive-ui'
+import { NTag, useDialog, useNotification } from 'naive-ui'
 
 const router = useRouter()
 const route = useRoute()
+const dialog = useDialog()
+const notification = useNotification()
+
+// 全局自动更新监听与弹窗提示
+const onUpdaterMessage = (_: unknown, data: { channel: string; text: string; data?: any }) => {
+  if (data.channel === 'available') {
+    notification.info({
+      title: '发现新版本',
+      content: `${data.text}，正在后台静默下载更新包...`,
+      duration: 6000
+    })
+  } else if (data.channel === 'downloaded') {
+    dialog.success({
+      title: '✨ 新版本已就绪',
+      content: `${data.text}。您可以立即重启软件体验最新功能，或在退出软件时自动完成更新。`,
+      positiveText: '立即重启更新',
+      negativeText: '稍后更新',
+      onPositiveClick: () => {
+        window.electron?.ipcRenderer?.invoke('updater:quit-and-install')
+      }
+    })
+  }
+}
+
+onMounted(() => {
+  window.electron?.ipcRenderer?.on('updater:message', onUpdaterMessage)
+})
+
+onUnmounted(() => {
+  window.electron?.ipcRenderer?.removeAllListeners('updater:message')
+})
 
 // 选中的菜单项
 const activeKey = computed(() => {
@@ -123,7 +154,7 @@ const menuOptions: MenuOption[] = [
 
       <!-- 底部操作区 -->
       <div class="sidebar-footer">
-        <n-text depth="3" class="version-text">v0.1.0 MVP</n-text>
+        <n-text depth="3" class="version-text">v0.1.2</n-text>
       </div>
     </aside>
 
