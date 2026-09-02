@@ -80,13 +80,18 @@ export function initPythonBridge(): Promise<boolean> {
     }
 
     const { command, args, cwd } = getPyServerCommand()
-    console.log(`[PythonBridge] 正在启动 Python 管道服务: ${command} ${args.join(' ')} (cwd: ${cwd})`)
+    console.log(`[PythonBridge] Starting Python bridge: ${command} ${args.join(' ')} (cwd: ${cwd})`)
 
     try {
       pyProcess = spawn(command, args, {
         cwd,
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' }
+        env: {
+          ...process.env,
+          PYTHONIOENCODING: 'utf-8',
+          PYTHONUNBUFFERED: '1',
+          PYTHONUTF8: '1'
+        }
       })
 
       // 使用 readline 按行解析 stdout 输出的 JSON-RPC 消息
@@ -101,7 +106,7 @@ export function initPythonBridge(): Promise<boolean> {
 
             // 处理首次就绪事件
             if (data.event === 'ready') {
-              console.log(`[PythonBridge] Python 核心服务就绪 ✓ (版本: ${data.version})`)
+              console.log(`[PythonBridge] Python core service ready (v${data.version}) [OK]`)
               isReady = true
               resolve(true)
               return
@@ -115,7 +120,7 @@ export function initPythonBridge(): Promise<boolean> {
               pendingRequests.delete(reqId)
 
               if (data.error) {
-                pending.reject(new Error(data.error.message || 'Python 处理异常'))
+                pending.reject(new Error(data.error.message || 'Python error'))
               } else {
                 pending.resolve(data.result)
               }
@@ -132,18 +137,18 @@ export function initPythonBridge(): Promise<boolean> {
       })
 
       pyProcess.on('error', (err) => {
-        console.error('[PythonBridge] 启动错误:', err.message)
+        console.error('[PythonBridge] Process error:', err.message)
         isReady = false
         resolve(false)
       })
 
       pyProcess.on('exit', (code) => {
-        console.log(`[PythonBridge] 进程退出, code=${code}`)
+        console.log(`[PythonBridge] Process exited, code=${code}`)
         isReady = false
         // 拒绝所有未决请求
         for (const [id, pending] of pendingRequests.entries()) {
           clearTimeout(pending.timer)
-          pending.reject(new Error('Python 进程已退出'))
+          pending.reject(new Error('Python process exited'))
         }
         pendingRequests.clear()
         pyProcess = null
@@ -152,12 +157,12 @@ export function initPythonBridge(): Promise<boolean> {
       // 5 秒超时保护
       setTimeout(() => {
         if (!isReady) {
-          console.warn('[PythonBridge] 等待就绪信号超时，请检查 Python 依赖是否安装')
+          console.warn('[PythonBridge] Timeout waiting for ready event')
           resolve(false)
         }
       }, 5000)
     } catch (err) {
-      console.error('[PythonBridge] spawn 异常:', err)
+      console.error('[PythonBridge] spawn error:', err)
       resolve(false)
     }
   })
@@ -169,7 +174,7 @@ export function initPythonBridge(): Promise<boolean> {
 export function callPython(method: string, params: Record<string, any> = {}, timeoutMs = 60000): Promise<any> {
   return new Promise((resolve, reject) => {
     if (!pyProcess || !pyProcess.stdin || !isReady) {
-      return reject(new Error('Python 核心服务未就绪，请确保已执行 pnpm py:install 安装 Python 依赖'))
+      return reject(new Error('Python 核心服务未就绪，请确保已安装 Python 依赖'))
     }
 
     const currentId = ++requestId
@@ -183,7 +188,7 @@ export function callPython(method: string, params: Record<string, any> = {}, tim
     const timer = setTimeout(() => {
       if (pendingRequests.has(currentId)) {
         pendingRequests.delete(currentId)
-        reject(new Error(`Python 方法 [${method}] 执行超时 (${timeoutMs / 1000}s)`))
+        reject(new Error(`Python method [${method}] execution timeout (${timeoutMs / 1000}s)`))
       }
     }, timeoutMs)
 
@@ -204,7 +209,7 @@ export function callPython(method: string, params: Record<string, any> = {}, tim
  */
 export function stopPythonBridge(): void {
   if (pyProcess) {
-    console.log('[PythonBridge] 正在关闭 Python 进程...')
+    console.log('[PythonBridge] Closing Python process...')
     pyProcess.kill('SIGTERM')
     setTimeout(() => {
       if (pyProcess && !pyProcess.killed) {
