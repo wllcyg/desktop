@@ -31,6 +31,7 @@
     "electron-updater": "^6.3.9",
     "naive-ui": "^2.41.0",
     "pinia": "^3.0.1",
+    "pixi.js": "^8.20.1",
     "vfonts": "^0.0.3",
     "vue-router": "^4.5.0"
   },

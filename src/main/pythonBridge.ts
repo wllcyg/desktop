@@ -33,11 +33,12 @@ function getPyServerCommand(): { command: string; args: string[]; cwd: string } 
 
   if (is.dev) {
     const venvPaths = [
-      join(rootDir, '.venv', 'Scripts', 'python.exe'),
-      join(rootDir, 'venv', 'Scripts', 'python.exe'),
+      join(rootDir, 'py_server', '.venv', 'bin', 'python'),
       join(rootDir, 'py_server', '.venv', 'Scripts', 'python.exe'),
       join(rootDir, '.venv', 'bin', 'python'),
-      join(rootDir, 'venv', 'bin', 'python')
+      join(rootDir, '.venv', 'Scripts', 'python.exe'),
+      join(rootDir, 'venv', 'bin', 'python'),
+      join(rootDir, 'venv', 'Scripts', 'python.exe')
     ]
 
     let pyExec = 'python'
@@ -69,16 +70,20 @@ function getPyServerCommand(): { command: string; args: string[]; cwd: string } 
   }
 }
 
+let initPromise: Promise<boolean> | null = null
+
 /**
  * 启动 Python 子进程并建立管道监听
  */
 export function initPythonBridge(): Promise<boolean> {
-  return new Promise((resolve) => {
-    if (pyProcess) {
-      resolve(true)
-      return
-    }
+  if (pyProcess && isReady) {
+    return Promise.resolve(true)
+  }
+  if (initPromise) {
+    return initPromise
+  }
 
+  initPromise = new Promise<boolean>((resolve) => {
     const { command, args, cwd } = getPyServerCommand()
     console.log(`[PythonBridge] Starting Python bridge: ${command} ${args.join(' ')} (cwd: ${cwd})`)
 
@@ -139,6 +144,7 @@ export function initPythonBridge(): Promise<boolean> {
       pyProcess.on('error', (err) => {
         console.error('[PythonBridge] Process error:', err.message)
         isReady = false
+        pyProcess = null
         resolve(false)
       })
 
@@ -165,18 +171,29 @@ export function initPythonBridge(): Promise<boolean> {
       console.error('[PythonBridge] spawn error:', err)
       resolve(false)
     }
+  }).finally(() => {
+    initPromise = null
   })
+
+  return initPromise
 }
 
 /**
  * 向 Python 服务发送 RPC 调用
  */
-export function callPython(method: string, params: Record<string, any> = {}, timeoutMs = 60000): Promise<any> {
-  return new Promise((resolve, reject) => {
-    if (!pyProcess || !pyProcess.stdin || !isReady) {
-      return reject(new Error('Python 核心服务未就绪，请确保已安装 Python 依赖'))
+export async function callPython(
+  method: string,
+  params: Record<string, any> = {},
+  timeoutMs = 60000
+): Promise<any> {
+  if (!pyProcess || !pyProcess.stdin || !isReady) {
+    const ready = await initPythonBridge()
+    if (!ready || !pyProcess || !pyProcess.stdin || !isReady) {
+      throw new Error('Python 核心服务未就绪，请确保已安装 Python 依赖')
     }
+  }
 
+  return new Promise((resolve, reject) => {
     const currentId = ++requestId
     const payload = JSON.stringify({
       jsonrpc: '2.0',
@@ -195,6 +212,9 @@ export function callPython(method: string, params: Record<string, any> = {}, tim
     pendingRequests.set(currentId, { resolve, reject, timer })
 
     try {
+      if (!pyProcess?.stdin) {
+        throw new Error('Python 进程输入管道未准备好')
+      }
       pyProcess.stdin.write(payload + '\n', 'utf-8')
     } catch (err) {
       clearTimeout(timer)

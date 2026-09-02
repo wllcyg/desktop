@@ -59,38 +59,22 @@ const menuOptions: MenuOption[] = [
         key: 'image-doc/ocr'
       },
       {
-        label: renderLabel('PDF转Word', '/image-doc/pdf-convert', true),
-        key: 'image-doc/pdf-convert'
-      },
-      {
         label: renderLabel('PDF合并/拆分', '/image-doc/pdf-tool'),
         key: 'image-doc/pdf-tool'
       },
       {
-        label: renderLabel('扫描件校正', '/image-doc/scan-enhance'),
-        key: 'image-doc/scan-enhance'
-      },
-      {
-        label: renderLabel('图片批量压缩', '/image-doc/compress'),
-        key: 'image-doc/compress'
+        label: renderLabel('图片工作台', '/image-doc/studio', true),
+        key: 'image-doc/studio'
       }
     ]
   },
   {
-    label: '二、批量/重复劳动',
+    label: '二、批量处理',
     key: 'cat-batch',
     children: [
       {
         label: renderLabel('文件批量重命名', '/batch/rename', true),
         key: 'batch/rename'
-      },
-      {
-        label: renderLabel('按班级学号归类', '/batch/classify'),
-        key: 'batch/classify'
-      },
-      {
-        label: renderLabel('Word/Excel模板填充', '/batch/template-fill'),
-        key: 'batch/template-fill'
       }
     ]
   },

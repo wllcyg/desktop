@@ -11,6 +11,7 @@ import os
 import cv2
 import numpy as np
 from typing import Optional, List, Dict
+import services.lama_inpaint
 
 
 def auto_remove_watermark(
@@ -49,9 +50,9 @@ def auto_remove_watermark(
             red_mask = cv2.dilate(red_mask, kernel, iterations=1)
 
             # 自动调用 LaMa AI 模型进行无缝脑补修复 (修复被红笔切断的化学公式与文字笔画)
-            if is_lama_available():
+            if services.lama_inpaint.is_lama_available():
                 try:
-                    result = lama_inpaint(result, red_mask)
+                    result = services.lama_inpaint.lama_inpaint(result, red_mask)
                 except Exception as e:
                     print(f"[AutoWatermark] LaMa 修复异常，降级为 OpenCV: {e}")
                     result = cv2.inpaint(result, red_mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
@@ -87,9 +88,6 @@ def auto_remove_watermark(
     return cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
 
 
-from services.lama_inpaint import lama_inpaint, is_lama_available
-
-
 def inpaint_with_mask(
     img: np.ndarray,
     mask: np.ndarray,
@@ -105,9 +103,9 @@ def inpaint_with_mask(
     - "ns": OpenCV Navier-Stokes 流体扩散算法
     """
     # 优先使用 LaMa AI 深度修复模型
-    if method == "lama" or is_lama_available():
+    if method == "lama" or services.lama_inpaint.is_lama_available():
         try:
-            return lama_inpaint(img, mask)
+            return services.lama_inpaint.lama_inpaint(img, mask)
         except Exception as e:
             print(f"[WatermarkService] LaMa 推理异常，自动降级为 OpenCV: {e}")
 

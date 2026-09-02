@@ -5,5 +5,8 @@ out
 .eslintcache
 *.log*
 .venv/
+**/.venv/
+**/__pycache__/
+*.pyc
 resources/models/*.onnx
 

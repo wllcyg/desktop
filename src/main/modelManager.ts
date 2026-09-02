@@ -7,12 +7,9 @@
  * 4. 支持模型文件安全删除与空间释放
  */
 
-import { app, ipcMain, BrowserWindow } from 'electron'
+import { app, ipcMain, BrowserWindow, net } from 'electron'
 import { join } from 'path'
 import { existsSync, mkdirSync, createWriteStream, promises as fsPromises, statSync } from 'fs'
-import { get as httpGet, RequestOptions } from 'http'
-import { get as httpsGet } from 'https'
-import { parse as parseUrl } from 'url'
 
 export interface ModelMetadata {
   id: string
@@ -39,8 +36,9 @@ export const MODEL_REGISTRY: Record<string, ModelMetadata> = {
     urls: [
       'https://hf-mirror.com/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx',
       'https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx',
-      'https://hf-mirror.com/Carve/LaMa-ONNX/resolve/main/lama.onnx',
-      'https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama.onnx'
+      'https://github.com/Sanster/models/releases/download/add_big_lama/big-lama.onnx',
+      'https://ghfast.top/https://github.com/Sanster/models/releases/download/add_big_lama/big-lama.onnx',
+      'https://mirror.ghproxy.com/https://github.com/Sanster/models/releases/download/add_big_lama/big-lama.onnx'
     ],
     isEssential: true
   },
@@ -53,9 +51,10 @@ export const MODEL_REGISTRY: Record<string, ModelMetadata> = {
     sizeBytes: 4.6 * 1024 * 1024,
     sizeFormatted: '4.6 MB',
     urls: [
-      'https://modelscope.cn/models/RapidAI/RapidOCR/resolve/master/PP-OCRv4/ch_PP-OCRv4_det_infer.onnx',
       'https://hf-mirror.com/SWHL/RapidOCR/resolve/main/PP-OCRv4/ch_PP-OCRv4_det_infer.onnx',
-      'https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv4/ch_PP-OCRv4_det_infer.onnx'
+      'https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv4/ch_PP-OCRv4_det_infer.onnx',
+      'https://github.com/RapidAI/RapidOCR/releases/download/v1.1.0/ch_PP-OCRv4_det_infer.onnx',
+      'https://ghfast.top/https://github.com/RapidAI/RapidOCR/releases/download/v1.1.0/ch_PP-OCRv4_det_infer.onnx'
     ],
     isEssential: false
   },
@@ -68,9 +67,9 @@ export const MODEL_REGISTRY: Record<string, ModelMetadata> = {
     sizeBytes: 43 * 1024 * 1024,
     sizeFormatted: '43 MB',
     urls: [
-      'https://mirror.ghproxy.com/https://github.com/fabio-sim/DocShadow-ONNX-TensorRT/releases/download/v1.0.0/docshadow_sd7k.onnx',
+      'https://github.com/fabio-sim/DocShadow-ONNX-TensorRT/releases/download/v1.0.0/docshadow_sd7k.onnx',
       'https://ghfast.top/https://github.com/fabio-sim/DocShadow-ONNX-TensorRT/releases/download/v1.0.0/docshadow_sd7k.onnx',
-      'https://github.com/fabio-sim/DocShadow-ONNX-TensorRT/releases/download/v1.0.0/docshadow_sd7k.onnx'
+      'https://mirror.ghproxy.com/https://github.com/fabio-sim/DocShadow-ONNX-TensorRT/releases/download/v1.0.0/docshadow_sd7k.onnx'
     ],
     isEssential: false
   }
@@ -117,7 +116,7 @@ export function getExistingModelPath(filename: string): string | null {
 // 当前活跃的下载任务
 interface ActiveDownload {
   modelId: string
-  req: any
+  abortController: AbortController
   destPath: string
   tempPath: string
   startTime: number
@@ -152,144 +151,126 @@ function broadcastProgress(
 }
 
 /**
- * 支持重定向的 HTTP/HTTPS 下载器
+ * 基于 Electron net.fetch 的可靠下载器（支持系统代理、HTTP2、自动重定向）
  */
-function downloadFile(
+async function downloadFile(
   urlStr: string,
   tempPath: string,
   modelId: string,
-  expectedTotal: number,
-  redirectCount = 0
+  expectedTotal: number
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (redirectCount > 8) {
-      return reject(new Error('重定向次数过多'))
-    }
+  const abortController = new AbortController()
+  const activeItem: ActiveDownload = {
+    modelId,
+    abortController,
+    destPath: tempPath,
+    tempPath,
+    startTime: Date.now(),
+    lastBytes: 0,
+    lastSpeedCalcTime: Date.now(),
+    speed: 0
+  }
+  activeDownloads.set(modelId, activeItem)
 
-    const parsed = parseUrl(urlStr)
-    const isHttps = parsed.protocol === 'https:'
-    const httpModule = isHttps ? httpsGet : httpGet
-
-    const options: RequestOptions & { rejectUnauthorized?: boolean } = {
-      ...parsed,
+  try {
+    const response = await net.fetch(urlStr, {
       headers: {
         'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Toolbox/0.1.0'
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Toolbox/0.1.0'
       },
-      timeout: 30000,
-      // 允许自签名或镜像代理证书
-      rejectUnauthorized: false
+      signal: abortController.signal,
+      redirect: 'follow'
+    })
+
+    if (!response.ok) {
+      throw new Error(`下载响应状态码异常: ${response.status} ${response.statusText}`)
     }
 
-    const req = httpModule(options, (res) => {
-      // 收到有效响应，清除建立连接的初始超时
-      req.setTimeout(0)
+    const contentType = response.headers.get('content-type') || ''
+    if (contentType.includes('text/html')) {
+      throw new Error('下载链接返回了 HTML 网页而非二进制模型文件')
+    }
 
-      // 全面支持 301, 302, 303, 307, 308 重定向
-      if (
-        res.statusCode &&
-        res.statusCode >= 300 &&
-        res.statusCode < 400 &&
-        res.headers.location
-      ) {
-        const nextUrl = new URL(res.headers.location, urlStr).toString()
-        console.log(`[ModelManager] 重定向 (${res.statusCode}) -> ${nextUrl}`)
-        return downloadFile(nextUrl, tempPath, modelId, expectedTotal, redirectCount + 1)
-          .then(resolve)
-          .catch(reject)
-      }
+    const contentLengthHeader = response.headers.get('content-length')
+    const totalBytes =
+      (contentLengthHeader ? parseInt(contentLengthHeader, 10) : 0) || expectedTotal
 
-      if (res.statusCode !== 200) {
-        return reject(new Error(`下载响应状态码异常: ${res.statusCode}`))
-      }
+    if (!response.body) {
+      throw new Error('响应体为空')
+    }
 
-      const contentType = res.headers['content-type'] || ''
-      if (contentType.includes('text/html')) {
-        return reject(new Error('下载链接返回了 HTML 网页而非二进制模型文件'))
-      }
+    const fileStream = createWriteStream(tempPath)
+    let downloadedBytes = 0
+    let lastCalcTime = Date.now()
+    let bytesSinceLastCalc = 0
+    let currentSpeedText = '0 MB/s'
 
-      const totalBytes =
-        parseInt(res.headers['content-length'] || `${expectedTotal}`, 10) || expectedTotal
-      const fileStream = createWriteStream(tempPath)
+    const reader = response.body.getReader()
 
-      let downloadedBytes = 0
-      let lastCalcTime = Date.now()
-      let bytesSinceLastCalc = 0
-      let currentSpeedText = '0 MB/s'
+    await new Promise<void>((resolve, reject) => {
+      fileStream.on('error', reject)
 
-      const activeItem: ActiveDownload = {
-        modelId,
-        req,
-        destPath: tempPath,
-        tempPath,
-        startTime: Date.now(),
-        lastBytes: 0,
-        lastSpeedCalcTime: Date.now(),
-        speed: 0
-      }
-      activeDownloads.set(modelId, activeItem)
+      const pump = async (): Promise<void> => {
+        try {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) {
+              fileStream.end(() => {
+                if (downloadedBytes < 100 * 1024) {
+                  reject(new Error(`下载文件大小异常 (${downloadedBytes} 字节)，文件不完整`))
+                } else {
+                  broadcastProgress(modelId, {
+                    status: 'completed',
+                    downloaded: downloadedBytes,
+                    total: totalBytes,
+                    percent: 100,
+                    speedText: '完成'
+                  })
+                  resolve()
+                }
+              })
+              break
+            }
 
-      res.on('data', (chunk: Buffer) => {
-        downloadedBytes += chunk.length
-        bytesSinceLastCalc += chunk.length
+            if (value) {
+              const buffer = Buffer.from(value)
+              downloadedBytes += buffer.length
+              bytesSinceLastCalc += buffer.length
 
-        const now = Date.now()
-        if (now - lastCalcTime >= 500) {
-          const speedBps = (bytesSinceLastCalc / (now - lastCalcTime)) * 1000
-          currentSpeedText = `${(speedBps / (1024 * 1024)).toFixed(1)} MB/s`
-          lastCalcTime = now
-          bytesSinceLastCalc = 0
+              const canWrite = fileStream.write(buffer)
+              if (!canWrite) {
+                await new Promise<void>((r) => fileStream.once('drain', () => r()))
+              }
 
-          const percent = Math.min(100, Math.round((downloadedBytes / totalBytes) * 100))
-          broadcastProgress(modelId, {
-            status: 'downloading',
-            downloaded: downloadedBytes,
-            total: totalBytes,
-            percent,
-            speedText: currentSpeedText
-          })
-        }
-      })
+              const now = Date.now()
+              if (now - lastCalcTime >= 500) {
+                const speedBps = (bytesSinceLastCalc / (now - lastCalcTime)) * 1000
+                currentSpeedText = `${(speedBps / (1024 * 1024)).toFixed(1)} MB/s`
+                lastCalcTime = now
+                bytesSinceLastCalc = 0
 
-      fileStream.on('finish', () => {
-        fileStream.close(() => {
-          activeDownloads.delete(modelId)
-
-          // 校验下载大小：小于 100KB 说明是错误页或中断文件
-          if (downloadedBytes < 100 * 1024) {
-            return reject(new Error(`下载文件大小异常 (${downloadedBytes} 字节)，文件不完整`))
+                const percent = Math.min(100, Math.round((downloadedBytes / totalBytes) * 100))
+                broadcastProgress(modelId, {
+                  status: 'downloading',
+                  downloaded: downloadedBytes,
+                  total: totalBytes,
+                  percent,
+                  speedText: currentSpeedText
+                })
+              }
+            }
           }
+        } catch (err) {
+          fileStream.destroy()
+          reject(err)
+        }
+      }
 
-          broadcastProgress(modelId, {
-            status: 'completed',
-            downloaded: downloadedBytes,
-            total: totalBytes,
-            percent: 100,
-            speedText: '完成'
-          })
-          resolve()
-        })
-      })
-
-      fileStream.on('error', (err) => {
-        activeDownloads.delete(modelId)
-        reject(err)
-      })
-
-      res.pipe(fileStream)
+      pump()
     })
-
-    req.on('error', (err) => {
-      activeDownloads.delete(modelId)
-      reject(err)
-    })
-
-    req.on('timeout', () => {
-      req.destroy()
-      activeDownloads.delete(modelId)
-      reject(new Error('下载连接建立超时'))
-    })
-  })
+  } finally {
+    activeDownloads.delete(modelId)
+  }
 }
 
 /**
@@ -385,7 +366,7 @@ export function setupModelManagerIPC(): void {
   ipcMain.handle('model:cancel-download', async (_, modelId: string) => {
     const active = activeDownloads.get(modelId)
     if (active) {
-      active.req?.destroy()
+      active.abortController.abort()
       activeDownloads.delete(modelId)
       if (existsSync(active.tempPath)) {
         try {

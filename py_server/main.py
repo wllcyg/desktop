@@ -82,6 +82,8 @@ def handle_ping(params: dict) -> dict:
 
 def handle_auto_remove_watermark(params: dict) -> dict:
     """单张全自动智能去水印"""
+    importlib.reload(services.watermark_service)
+    importlib.reload(services.lama_inpaint)
     input_source = params["input"]
     output_path = params.get("output_path")
     sensitivity = int(params.get("sensitivity", 200))
@@ -89,21 +91,14 @@ def handle_auto_remove_watermark(params: dict) -> dict:
     auto_clean_red = bool(params.get("auto_clean_red", True))
 
     img = _read_image(input_source)
-    result = auto_remove_watermark(img, sensitivity, contrast, auto_clean_red)
+    result = services.watermark_service.auto_remove_watermark(img, sensitivity, contrast, auto_clean_red)
     return _save_or_encode_result(result, output_path, return_base64=True)
 
 
 def handle_batch_remove_watermark(params: dict) -> dict:
-    """
-    批量多张智能去水印
-    params: {
-      items: [ { id: "1", input: "D:/a.png", output_path: "D:/out/a.png" }, ... ],
-      sensitivity: 200,
-      contrast: 1.3,
-      auto_clean_red: true,
-      return_base64: true
-    }
-    """
+    """批量多张智能去水印"""
+    importlib.reload(services.watermark_service)
+    importlib.reload(services.lama_inpaint)
     items = params.get("items", [])
     sensitivity = int(params.get("sensitivity", 200))
     contrast = float(params.get("contrast", 1.3))
@@ -118,7 +113,7 @@ def handle_batch_remove_watermark(params: dict) -> dict:
 
         try:
             img = _read_image(input_source)
-            processed = auto_remove_watermark(img, sensitivity, contrast, auto_clean_red)
+            processed = services.watermark_service.auto_remove_watermark(img, sensitivity, contrast, auto_clean_red)
             res = _save_or_encode_result(processed, output_path, return_base64=return_base64)
             results.append({
                 "id": item_id,
@@ -138,16 +133,18 @@ def handle_batch_remove_watermark(params: dict) -> dict:
 
 def handle_inpaint_watermark(params: dict) -> dict:
     """画笔涂抹修补"""
+    importlib.reload(services.watermark_service)
+    importlib.reload(services.lama_inpaint)
     input_source = params["input"]
     mask_source = params["mask"]
     output_path = params.get("output_path")
     radius = int(params.get("radius", 5))
-    method = params.get("method", "telea")
+    method = params.get("method", "lama")
 
     img = _read_image(input_source)
     mask = _read_image(mask_source)
 
-    result = inpaint_with_mask(img, mask, radius, method)
+    result = services.watermark_service.inpaint_with_mask(img, mask, radius, method)
     return _save_or_encode_result(result, output_path, return_base64=True)
 
 
@@ -276,8 +273,11 @@ METHODS = {
     "model.verify_and_start": handle_verify_and_start_model,
     "model.get_status": handle_get_models_status,
     "watermark.auto_remove": handle_auto_remove_watermark,
+    "auto_remove_watermark": handle_auto_remove_watermark,
     "watermark.batch_remove": handle_batch_remove_watermark,
+    "batch_remove_watermark": handle_batch_remove_watermark,
     "watermark.inpaint": handle_inpaint_watermark,
+    "inpaint_watermark": handle_inpaint_watermark,
     "ocr.recognize": handle_ocr_recognize,
     "ocr.parse_formula": handle_parse_formula,
     "pdf.get_info": handle_pdf_get_info,

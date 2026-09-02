@@ -44,10 +44,10 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '扫描件校正' }
       },
       {
-        path: 'image-doc/compress',
-        name: 'Compress',
-        component: () => import('@renderer/views/image-doc/CompressView.vue'),
-        meta: { title: '图片批量压缩' }
+        path: 'image-doc/studio',
+        name: 'ImageStudio',
+        component: () => import('@renderer/views/image-doc/ImageStudioView.vue'),
+        meta: { title: '图片工作台' }
       },
       // 二、批量/重复劳动类
       {

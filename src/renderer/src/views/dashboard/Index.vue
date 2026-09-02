@@ -5,16 +5,16 @@ const router = useRouter()
 
 const mvpTools = [
   {
-    title: '图片去水印',
-    desc: '批量清除下载课件、习题图片上的水印',
-    route: '/image-doc/watermark',
+    title: '图片工作台',
+    desc: 'PixiJS GPU加速编辑、预设滤镜、文字水印与AI智能去水印',
+    route: '/image-doc/studio',
     tag: 'MVP ⭐⭐⭐',
     color: '#0284c7'
   },
   {
-    title: 'PDF 转 Word',
-    desc: '教辅 PDF 快速转可编辑文档，方便二次出题',
-    route: '/image-doc/pdf-convert',
+    title: '图片去水印',
+    desc: '批量清除下载课件、习题图片上的水印',
+    route: '/image-doc/watermark',
     tag: 'MVP ⭐⭐⭐',
     color: '#059669'
   },
@@ -38,20 +38,16 @@ const categories = [
   {
     name: '一、图片/文档处理类',
     items: [
+      { name: '图片工作台', route: '/image-doc/studio' },
       { name: '图片去水印', route: '/image-doc/watermark' },
       { name: 'OCR文字/公式识别', route: '/image-doc/ocr' },
-      { name: 'PDF转Word', route: '/image-doc/pdf-convert' },
-      { name: 'PDF合并/拆分', route: '/image-doc/pdf-tool' },
-      { name: '扫描件校正', route: '/image-doc/scan-enhance' },
-      { name: '图片批量压缩', route: '/image-doc/compress' }
+      { name: 'PDF合并/拆分', route: '/image-doc/pdf-tool' }
     ]
   },
   {
-    name: '二、批量/重复劳动类',
+    name: '二、批量处理类',
     items: [
-      { name: '文件批量重命名', route: '/batch/rename' },
-      { name: '按班级学号归类', route: '/batch/classify' },
-      { name: 'Word/Excel模板填充', route: '/batch/template-fill' }
+      { name: '文件批量重命名', route: '/batch/rename' }
     ]
   }
 ]

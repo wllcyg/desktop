@@ -5,7 +5,7 @@ PDF 核心处理服务 (基于 PyMuPDF / fitz)
 
 import os
 import re
-import fitz  # PyMuPDF
+import pymupdf as fitz  # PyMuPDF
 import base64
 from typing import List, Dict, Any, Optional, Tuple
 

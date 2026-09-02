@@ -4,7 +4,7 @@ LaMa (Large Mask Inpainting) ONNX 深度学习图像修复引擎
 基于开源 Big-LaMa 傅里叶卷积图像修复模型：
 - 纯 CPU 极速推理 (无需 GPU / PyTorch，基于 ONNX Runtime)
 - 自动脑补被水印/污渍遮挡的背景纹理、横线、网格与纸张细节
-- 支持任意分辨率输入 (自动 pad 到 8 的倍数并自适应还原)
+- 完美适配固定尺寸 (512x512) 与动态尺寸 ONNX 模型，无缝融合原图分辨率
 """
 
 import os
@@ -67,41 +67,74 @@ def lama_inpaint(img: np.ndarray, mask: np.ndarray) -> np.ndarray:
     Returns:
         修复后的图片 (BGR 格式, uint8)
     """
+    orig_h, orig_w = img.shape[:2]
+
+    # 1. 预处理 Mask 为严格单通道二值图
+    if len(mask.shape) == 3:
+        mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+    _, mask_binary = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+
+    # 微膨胀掩膜消除笔刷边界残留
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    mask_dilated = cv2.dilate(mask_binary, kernel, iterations=1)
+
     session = init_lama_session()
     if session is None:
         # 模型未就绪时优雅降级为 OpenCV Telea 算法
         print("[LaMa] 未检测到 lama.onnx 模型，自动降级为 OpenCV 修复算法")
-        flag = cv2.INPAINT_TELEA
-        return cv2.inpaint(img, mask, inpaintRadius=5, flags=flag)
+        return cv2.inpaint(img, mask_dilated, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
 
-    # 1. 预处理 Mask
-    if len(mask.shape) == 3:
-        mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
-    _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+    try:
+        # 2. 读取模型输入尺寸要求 (判断是 512x512 固定尺寸还是动态尺寸)
+        inputs_meta = session.get_inputs()
+        input_shape = inputs_meta[0].shape
+        
+        is_fixed_dim = False
+        target_h, target_w = 512, 512
 
-    # 微膨胀掩膜消除画笔边缘残留
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    mask = cv2.dilate(mask, kernel, iterations=1)
+        # 检查是否包含固定整数维度
+        if len(input_shape) == 4:
+            dim_h = input_shape[2]
+            dim_w = input_shape[3]
+            if isinstance(dim_h, int) and dim_h > 0 and isinstance(dim_w, int) and dim_w > 0:
+                is_fixed_dim = True
+                target_h, target_w = dim_h, dim_w
 
-    # 2. 图像填充到 8 的整数倍
-    img_padded, orig_h, orig_w = pad_to_multiple(img, multiple=8)
-    mask_padded, _, _ = pad_to_multiple(mask, multiple=8)
+        if is_fixed_dim:
+            # 固定尺寸模型 (如 512x512)：缩放 -> 推理 -> 双三次还原插值 -> 仅覆盖掩膜区域
+            img_input = cv2.resize(img, (target_w, target_h), interpolation=cv2.INTER_AREA)
+            mask_input = cv2.resize(mask_dilated, (target_w, target_h), interpolation=cv2.INTER_NEAREST)
+        else:
+            # 动态尺寸模型：填充至 8 的倍数
+            img_input, _, _ = pad_to_multiple(img, multiple=8)
+            mask_input, _, _ = pad_to_multiple(mask_dilated, multiple=8)
 
-    # 3. 归一化与通道转换 (BGR -> RGB, [H, W, C] -> [1, C, H, W], float32 [0, 1])
-    img_rgb = cv2.cvtColor(img_padded, cv2.COLOR_BGR2RGB)
-    img_tensor = (img_rgb.astype(np.float32) / 255.0).transpose(2, 0, 1)[np.newaxis, ...]
-    mask_tensor = (mask_padded.astype(np.float32) / 255.0)[np.newaxis, np.newaxis, ...]
+        # 3. 归一化与通道转换 (BGR -> RGB, [H, W, C] -> [1, C, H, W], float32 [0, 1])
+        img_rgb = cv2.cvtColor(img_input, cv2.COLOR_BGR2RGB)
+        img_tensor = (img_rgb.astype(np.float32) / 255.0).transpose(2, 0, 1)[np.newaxis, ...]
+        mask_tensor = (mask_input.astype(np.float32) / 255.0)[np.newaxis, np.newaxis, ...]
 
-    # 4. ONNX Runtime CPU 推理
-    input_names = [inp.name for inp in session.get_inputs()]
-    inputs = {input_names[0]: img_tensor, input_names[1]: mask_tensor}
-    outputs = session.run(None, inputs)
+        # 4. ONNX Runtime CPU 推理
+        input_names = [inp.name for inp in inputs_meta]
+        inputs = {input_names[0]: img_tensor, input_names[1]: mask_tensor}
+        outputs = session.run(None, inputs)
 
-    # 5. 后处理 (输出张量转回 uint8 BGR 图像并裁切回原尺寸)
-    output = outputs[0][0].transpose(1, 2, 0)
-    output = np.clip(output * 255.0, 0, 255).astype(np.uint8)
-    output_bgr = cv2.cvtColor(output, cv2.COLOR_RGB2BGR)
+        # 5. 后处理 (输出张量转回 uint8 BGR 图像)
+        output = outputs[0][0].transpose(1, 2, 0)
+        output = np.clip(output * 255.0, 0, 255).astype(np.uint8)
+        output_bgr = cv2.cvtColor(output, cv2.COLOR_RGB2BGR)
 
-    # 裁切回原图尺寸
-    result = output_bgr[:orig_h, :orig_w]
-    return result
+        if is_fixed_dim:
+            # 还原至原图分辨率
+            output_full = cv2.resize(output_bgr, (orig_w, orig_h), interpolation=cv2.INTER_LANCZOS4)
+        else:
+            output_full = output_bgr[:orig_h, :orig_w]
+
+        # 6. 精准像素融合：非掩膜区域 100% 保持原始画质，仅将掩膜区域无痕替换为 AI 修复内容
+        result = img.copy()
+        result[mask_dilated > 0] = output_full[mask_dilated > 0]
+        return result
+
+    except Exception as e:
+        print(f"[LaMa] 模型推理发生异常，自动降级为 OpenCV 修复: {e}")
+        return cv2.inpaint(img, mask_dilated, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
