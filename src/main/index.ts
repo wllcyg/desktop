@@ -3,6 +3,7 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { setupAutoUpdater } from './updater'
+import { startPythonServer, waitForPythonServer, getPyServerBaseUrl } from './pythonServer'
 
 function createWindow(): void {
   // Create the browser window.
@@ -43,7 +44,7 @@ function createWindow(): void {
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.app.toolbox')
 
@@ -56,6 +57,15 @@ app.whenReady().then(() => {
 
   // IPC test
   ipcMain.on('ping', () => console.log('pong'))
+
+  // 启动 Python 核心服务
+  startPythonServer()
+  const pyReady = await waitForPythonServer()
+  console.log(`[Main] Python 服务状态: ${pyReady ? '就绪 ✓' : '未启动 ✗'}`)
+
+  // 向渲染进程暴露 Python 服务基础 URL
+  ipcMain.handle('py-server:base-url', () => getPyServerBaseUrl())
+  ipcMain.handle('py-server:status', () => pyReady)
 
   createWindow()
 

@@ -11,13 +11,26 @@ files:
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
 asarUnpack:
   - resources/**
+extraResources:
+  - from: resources/py_server
+    to: py_server
+    filter:
+      - '**/*'
 win:
   executableName: 工具箱
 nsis:
-  artifactName: ${name}-${version}-setup.${ext}
-  shortcutName: ${productName}
-  uninstallDisplayName: ${productName}
-  createDesktopShortcut: always
+  oneClick: false # 关闭一键安装，启用经典向导安装界面
+  allowToChangeInstallationDirectory: true # 允许用户自定义安装路径
+  allowElevation: true # 允许请求管理员权限
+  perMachine: false # 默认仅为当前用户安装（不需要强制管理员权限），也可在安装时切换
+  createDesktopShortcut: always # 始终创建桌面快捷方式
+  createStartMenuShortcut: true # 创建开始菜单快捷方式
+  shortcutName: ${productName} # 快捷方式名称
+  uninstallDisplayName: ${productName} # 控制面板卸载名称
+  artifactName: ${name}-${version}-setup.${ext} # 安装包文件名
+  license: build/license.txt # 用户许可协议条款
+  runAfterFinish: true # 安装完成后勾选“运行软件”
+  language: "2052" # 简体中文向导界面
 mac:
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
