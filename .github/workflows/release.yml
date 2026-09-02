@@ -1,0 +1,45 @@
+name: Build & Release Desktop App
+
+on:
+  push:
+    tags:
+      - 'v*' # 当推送形如 v1.0.0, v1.0.1 的标签时自动触发
+  workflow_dispatch: # 支持在 GitHub Actions 页面手动点击一键运行
+
+permissions:
+  contents: write # 允许创建 Release 并上传打包安装包
+
+jobs:
+  build-and-release:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest] # 聚焦 Windows 平台，后续如需 Mac 可追加 macos-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: 设置 Node.js 环境
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile=false
+
+      - name: 执行代码构建
+        run: pnpm run build
+
+      - name: 打包并发布至 GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pnpm exec electron-builder --win --publish always
