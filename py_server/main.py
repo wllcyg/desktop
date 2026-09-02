@@ -25,6 +25,10 @@ from services.watermark_service import (
     auto_remove_watermark,
     inpaint_with_mask,
 )
+from services.model_hub import (
+    verify_and_start_model,
+    get_all_models_status,
+)
 
 
 def _read_image(source: str) -> np.ndarray:
@@ -147,11 +151,123 @@ def handle_inpaint_watermark(params: dict) -> dict:
     return _save_or_encode_result(result, output_path, return_base64=True)
 
 
+import importlib
+import services.model_hub
+
+def handle_verify_and_start_model(params: dict) -> dict:
+    importlib.reload(services.model_hub)
+    model_id = params.get("model_id")
+    return services.model_hub.verify_and_start_model(model_id)
+
+
+def handle_get_models_status(params: dict) -> dict:
+    importlib.reload(services.model_hub)
+    return services.model_hub.get_all_models_status()
+
+
+import services.ocr_service
+import services.formula_parser
+import services.pdf_service
+
+def handle_ocr_recognize(params: dict) -> dict:
+    """OCR 识别 (支持全图与局部选区，DocRes 增强联动)"""
+    importlib.reload(services.ocr_service)
+    importlib.reload(services.formula_parser)
+
+    source = params.get("image")
+    if not source:
+        raise ValueError("缺少待识别图像输入")
+
+    img = _read_image(source)
+    crop_box = params.get("crop_box")
+    mode = params.get("mode", "chemistry")
+    use_docres = bool(params.get("use_docres", False))
+
+    return services.ocr_service.run_ocr_pipeline(
+        img=img,
+        crop_box=crop_box,
+        mode=mode,
+        use_docres=use_docres
+    )
+
+
+def handle_parse_formula(params: dict) -> dict:
+    """独立公式/文本解析转换 (转 LaTeX 与 MathML)"""
+    importlib.reload(services.formula_parser)
+    text = params.get("text", "")
+    mode = params.get("mode", "chemistry")
+    return services.formula_parser.parse_equation_or_text(text, mode=mode)
+
+
+def handle_pdf_get_info(params: dict) -> dict:
+    """获取 PDF 基础信息及缩略图"""
+    importlib.reload(services.pdf_service)
+    pdf_path = params.get("path")
+    include_thumbnails = bool(params.get("include_thumbnails", False))
+    max_thumb_size = int(params.get("max_thumb_size", 240))
+    return services.pdf_service.get_pdf_info(
+        pdf_path=pdf_path,
+        include_thumbnails=include_thumbnails,
+        max_thumb_size=max_thumb_size
+    )
+
+
+def handle_pdf_merge(params: dict) -> dict:
+    """PDF 多文件合并"""
+    importlib.reload(services.pdf_service)
+    file_configs = params.get("files", [])
+    output_path = params.get("output_path")
+    auto_generate_toc = bool(params.get("auto_generate_toc", True))
+    compress = bool(params.get("compress", True))
+    return services.pdf_service.merge_pdfs(
+        file_configs=file_configs,
+        output_path=output_path,
+        auto_generate_toc=auto_generate_toc,
+        compress=compress
+    )
+
+
+def handle_pdf_split(params: dict) -> dict:
+    """PDF 规则拆分"""
+    importlib.reload(services.pdf_service)
+    pdf_path = params.get("path")
+    split_mode = params.get("split_mode", "by_chunk")
+    split_params = params.get("params", {})
+    output_dir = params.get("output_dir")
+    return services.pdf_service.split_pdf(
+        pdf_path=pdf_path,
+        split_mode=split_mode,
+        params=split_params,
+        output_dir=output_dir
+    )
+
+
+def handle_pdf_reorganize(params: dict) -> dict:
+    """PDF 可视化重排与旋转导出"""
+    importlib.reload(services.pdf_service)
+    pdf_path = params.get("path")
+    page_configs = params.get("pages", [])
+    output_path = params.get("output_path")
+    return services.pdf_service.reorganize_pdf(
+        pdf_path=pdf_path,
+        page_configs=page_configs,
+        output_path=output_path
+    )
+
+
 METHODS = {
     "ping": handle_ping,
+    "model.verify_and_start": handle_verify_and_start_model,
+    "model.get_status": handle_get_models_status,
     "watermark.auto_remove": handle_auto_remove_watermark,
     "watermark.batch_remove": handle_batch_remove_watermark,
     "watermark.inpaint": handle_inpaint_watermark,
+    "ocr.recognize": handle_ocr_recognize,
+    "ocr.parse_formula": handle_parse_formula,
+    "pdf.get_info": handle_pdf_get_info,
+    "pdf.merge": handle_pdf_merge,
+    "pdf.split": handle_pdf_split,
+    "pdf.reorganize": handle_pdf_reorganize,
 }
 
 

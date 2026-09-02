@@ -124,6 +124,12 @@ const routes: RouteRecordRaw[] = [
         name: 'Settings',
         component: () => import('@renderer/views/settings/SettingsView.vue'),
         meta: { title: '系统设置' }
+      },
+      {
+        path: 'settings/models',
+        name: 'ModelManager',
+        component: () => import('@renderer/views/settings/ModelManagerView.vue'),
+        meta: { title: 'AI模型管理' }
       }
     ]
   },

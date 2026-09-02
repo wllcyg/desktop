@@ -9,72 +9,29 @@ LaMa (Large Mask Inpainting) ONNX 深度学习图像修复引擎
 
 import os
 import sys
-import urllib.request
 import cv2
 import numpy as np
 
-# 模型存放目录
-MODELS_DIR = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "resources", "models")
+from services.model_hub import (
+    get_model_path as hub_get_model_path,
+    is_model_installed as hub_is_installed,
+    get_or_create_session as hub_get_session,
 )
-LAMA_MODEL_PATH = os.path.join(MODELS_DIR, "lama.onnx")
-
-# 官方/镜像 LaMa ONNX 模型下载源 (备用镜像源)
-LAMA_MODEL_URLS = [
-    "https://github.com/advimman/lama/releases/download/v0.1/big-lama.onnx",
-    "https://huggingface.co/anyisalin/big-lama-onnx/resolve/main/lama.onnx",
-]
-
-_session = None
 
 
 def get_model_path() -> str:
-    """获取模型文件路径，支持开发环境与生产打包环境"""
-    if os.path.isfile(LAMA_MODEL_PATH):
-        return LAMA_MODEL_PATH
-
-    # 打包后资源路径兼容
-    if getattr(sys, "frozen", False):
-        res_path = os.path.join(sys._MEIPASS, "models", "lama.onnx")
-        if os.path.isfile(res_path):
-            return res_path
-
-    return LAMA_MODEL_PATH
+    """获取模型文件路径，优先使用 model_hub 统一解析"""
+    return hub_get_model_path("lama")
 
 
 def is_lama_available() -> bool:
     """检查 LaMa 模型文件是否已就绪"""
-    return os.path.isfile(get_model_path())
+    return hub_is_installed("lama")
 
 
 def init_lama_session():
-    """惰性初始化 ONNX Runtime Session"""
-    global _session
-    if _session is not None:
-        return _session
-
-    model_path = get_model_path()
-    if not os.path.isfile(model_path):
-        return None
-
-    try:
-        import onnxruntime as ort
-
-        # 配置纯 CPU 高性能执行选项
-        sess_options = ort.SessionOptions()
-        sess_options.intra_op_num_threads = max(2, os.cpu_count() or 4)
-        sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-
-        _session = ort.InferenceSession(
-            model_path,
-            sess_options=sess_options,
-            providers=["CPUExecutionProvider"],
-        )
-        print(f"[LaMa] ONNX Runtime Session 初始化成功: {model_path}")
-        return _session
-    except Exception as e:
-        print(f"[LaMa] Session 初始化异常: {e}", file=sys.stderr)
-        return None
+    """惰性获取 ONNX Runtime Session"""
+    return hub_get_session("lama")
 
 
 def pad_to_multiple(img: np.ndarray, multiple: int = 8):

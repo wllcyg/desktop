@@ -47,8 +47,16 @@ def auto_remove_watermark(
             _, red_mask = cv2.threshold(red_diff, 45, 255, cv2.THRESH_BINARY)
             kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
             red_mask = cv2.dilate(red_mask, kernel, iterations=1)
-            # 将红色区域安全填白
-            result[red_mask == 255] = [255, 255, 255]
+
+            # 自动调用 LaMa AI 模型进行无缝脑补修复 (修复被红笔切断的化学公式与文字笔画)
+            if is_lama_available():
+                try:
+                    result = lama_inpaint(result, red_mask)
+                except Exception as e:
+                    print(f"[AutoWatermark] LaMa 修复异常，降级为 OpenCV: {e}")
+                    result = cv2.inpaint(result, red_mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
+            else:
+                result = cv2.inpaint(result, red_mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
 
     # 阶段 2：智能背景光照归一化 (核心算法，消除平铺水印与不均光影)
     gray = cv2.cvtColor(result, cv2.COLOR_BGR2GRAY)

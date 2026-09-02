@@ -149,7 +149,11 @@ const menuOptions: MenuOption[] = [
     key: 'd2'
   },
   {
-    label: () => h(RouterLink, { to: '/settings' }, { default: () => '系统设置与关于' }),
+    label: () => h(RouterLink, { to: '/settings/models' }, { default: () => '🧩 AI本地模型管理' }),
+    key: 'settings/models'
+  },
+  {
+    label: () => h(RouterLink, { to: '/settings' }, { default: () => '⚙️ 系统设置与关于' }),
     key: 'settings'
   }
 ]

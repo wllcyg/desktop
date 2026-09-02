@@ -11,7 +11,12 @@ import {
   SettingsOutline,
   CheckmarkCircleOutline,
   ImagesOutline,
-  AlertCircleOutline
+  AlertCircleOutline,
+  SearchOutline,
+  ExpandOutline,
+  ChevronBackOutline,
+  ChevronForwardOutline,
+  EyeOutline
 } from '@vicons/ionicons5'
 
 const message = useMessage()
@@ -37,6 +42,89 @@ const showAdvanced = ref<boolean>(false)
 const sensitivity = ref<number>(200)
 const contrast = ref<number>(1.3)
 const autoCleanRed = ref<boolean>(true)
+
+// 弹窗大图预览状态 (支持无级滚轮缩放与平移拖拽)
+const isPreviewOpen = ref<boolean>(false)
+const previewMode = ref<'result' | 'compare' | 'original'>('result')
+const zoomScale = ref<number>(1)
+const panX = ref<number>(0)
+const panY = ref<number>(0)
+const isDragging = ref<boolean>(false)
+const dragStart = { x: 0, y: 0 }
+
+const openPreviewModal = (mode: 'result' | 'compare' | 'original' = 'result') => {
+  if (!currentItem.value) return
+  if (mode === 'result' && !currentItem.value.resultUrl) {
+    message.info('该图片尚未处理，展示原图预览')
+    previewMode.value = 'original'
+  } else {
+    previewMode.value = mode
+  }
+  handleZoomReset()
+  isPreviewOpen.value = true
+}
+
+const handleZoomIn = () => {
+  zoomScale.value = Math.min(4.0, Number((zoomScale.value + 0.25).toFixed(2)))
+}
+
+const handleZoomOut = () => {
+  zoomScale.value = Math.max(0.3, Number((zoomScale.value - 0.25).toFixed(2)))
+}
+
+const handleZoomReset = () => {
+  zoomScale.value = 1
+  panX.value = 0
+  panY.value = 0
+}
+
+const handleViewerWheel = (e: WheelEvent) => {
+  e.preventDefault()
+  if (e.deltaY < 0) {
+    handleZoomIn()
+  } else {
+    handleZoomOut()
+  }
+}
+
+const handleMouseDown = (e: MouseEvent) => {
+  if (e.button !== 0) return
+  isDragging.value = true
+  dragStart.x = e.clientX - panX.value
+  dragStart.y = e.clientY - panY.value
+}
+
+const handleMouseMove = (e: MouseEvent) => {
+  if (!isDragging.value) return
+  panX.value = e.clientX - dragStart.x
+  panY.value = e.clientY - dragStart.y
+}
+
+const handleMouseUp = () => {
+  isDragging.value = false
+}
+
+const handleDoubleClick = () => {
+  if (zoomScale.value === 1) {
+    zoomScale.value = 2
+  } else {
+    handleZoomReset()
+  }
+}
+
+const prevPreviewImage = () => {
+  if (selectedIndex.value > 0) {
+    selectedIndex.value--
+    handleZoomReset()
+  }
+}
+
+const nextPreviewImage = () => {
+  if (selectedIndex.value < imageList.value.length - 1) {
+    selectedIndex.value++
+    handleZoomReset()
+  }
+}
 
 // 当前选中的图片项
 const currentItem = computed<ImageItem | null>(() => {
@@ -108,6 +196,9 @@ const clearAll = () => {
       URL.revokeObjectURL(item.resultUrl)
     }
   })
+  if (fileInput.value) {
+    fileInput.value.value = ''
+  }
   imageList.value = []
   selectedIndex.value = 0
 }
@@ -199,24 +290,57 @@ const saveCurrentResult = () => {
   message.success('已保存当前图片')
 }
 
-// 批量保存全部结果
-const saveAllResults = () => {
+// 批量保存全部结果 (单次弹窗选择目录，极速批量保存)
+const isExporting = ref<boolean>(false)
+const saveAllResults = async () => {
   const doneItems = imageList.value.filter((item) => item.status === 'done' && item.resultUrl)
   if (doneItems.length === 0) {
     message.warning('暂无处理完成的图片可保存')
     return
   }
 
-  doneItems.forEach((item, index) => {
-    setTimeout(() => {
-      const a = document.createElement('a')
-      a.href = item.resultUrl!
-      a.download = `去水印_${item.name}`
-      a.click()
-    }, index * 200)
-  })
+  try {
+    isExporting.value = true
+    // 优先调用 Electron 原生文件夹选择器（仅弹窗 1 次）
+    if (window.electron?.ipcRenderer) {
+      const dirPath = await window.electron.ipcRenderer.invoke('dialog:select-directory')
+      if (!dirPath) {
+        // 用户主动取消了选择
+        return
+      }
 
-  message.success(`正在批量下载 ${doneItems.length} 张处理好的图片`)
+      const itemsToSave = doneItems.map((item) => ({
+        name: `去水印_${item.name}`,
+        base64: item.resultUrl!
+      }))
+
+      const res = await window.electron.ipcRenderer.invoke('file:save-batch', {
+        dirPath,
+        items: itemsToSave
+      })
+
+      if (res?.success) {
+        message.success(`成功导出 ${res.count} 张图片至: ${dirPath}`, {
+          duration: 4000
+        })
+      } else {
+        throw new Error('批量保存失败')
+      }
+    } else {
+      // 纯浏览器降级模式 (单次打包或提示)
+      doneItems.forEach((item) => {
+        const a = document.createElement('a')
+        a.href = item.resultUrl!
+        a.download = `去水印_${item.name}`
+        a.click()
+      })
+      message.success(`正在下载 ${doneItems.length} 张图片`)
+    }
+  } catch (err: any) {
+    message.error(err?.message || '导出图片失败')
+  } finally {
+    isExporting.value = false
+  }
 }
 </script>
 
@@ -229,30 +353,27 @@ const saveAllResults = () => {
       multiple
       accept="image/*"
       style="display: none"
-      @change="(e) => handleFilesSelect((e.target as HTMLInputElement).files)"
+      @change="
+        (e) => {
+          handleFilesSelect((e.target as HTMLInputElement).files)
+          ;(e.target as HTMLInputElement).value = ''
+        }
+      "
     >
 
     <!-- 顶部状态栏 -->
     <div class="top-bar">
       <div class="bar-left">
         <h1 class="bar-title">图片去水印</h1>
-        <n-tag type="success" size="small" round>全自动智能引擎</n-tag>
+        <n-tag type="success" size="small" round>
+          <template #icon><n-icon :component="SparklesOutline" /></template>
+          全自动 AI 深度引擎 (LaMa)
+        </n-tag>
         <span class="bar-subtitle">
           自动识别消除试卷平铺浅色水印、背景拍摄阴影及红笔印章批改
         </span>
       </div>
       <div class="bar-right">
-        <n-button
-          v-if="completedCount > 0"
-          type="primary"
-          size="small"
-          @click="saveAllResults"
-        >
-          <template #icon>
-            <n-icon :component="DownloadOutline" />
-          </template>
-          一键下载全部 ({{ completedCount }})
-        </n-button>
         <n-button
           v-if="imageList.length > 0"
           size="small"
@@ -349,12 +470,13 @@ const saveAllResults = () => {
               block
               size="medium"
               class="download-all-btn"
+              :loading="isExporting"
               @click="saveAllResults"
             >
               <template #icon>
                 <n-icon :component="DownloadOutline" />
               </template>
-              一键下载全部图片 ({{ completedCount }})
+              一键导出全部图片 ({{ completedCount }})
             </n-button>
 
             <div class="btn-row">
@@ -439,6 +561,18 @@ const saveAllResults = () => {
             <div class="vp-right">
               <n-button
                 v-if="currentItem?.resultUrl"
+                size="small"
+                secondary
+                type="info"
+                @click="openPreviewModal('compare')"
+              >
+                <template #icon>
+                  <n-icon :component="ExpandOutline" />
+                </template>
+                弹窗高清对比
+              </n-button>
+              <n-button
+                v-if="currentItem?.resultUrl"
                 type="primary"
                 size="small"
                 @click="saveCurrentResult"
@@ -454,22 +588,41 @@ const saveAllResults = () => {
           <!-- 双屏对比视口 -->
           <div class="compare-view">
             <!-- 原图卡片 -->
-            <div class="view-card">
+            <div
+              class="view-card clickable-card"
+              title="点击弹窗放大查看原图"
+              @click="openPreviewModal('original')"
+            >
               <div class="view-tag original-tag">原始图片</div>
+              <div class="card-action-hint">
+                <n-icon :component="SearchOutline" size="14" /> 点击放大
+              </div>
               <div class="view-content">
                 <img :src="currentItem?.previewUrl" alt="original" />
               </div>
             </div>
 
             <!-- 去水印效果卡片 -->
-            <div class="view-card">
+            <div
+              class="view-card"
+              :class="{ 'clickable-card': Boolean(currentItem?.resultUrl) }"
+              :title="currentItem?.resultUrl ? '点击弹窗高清对比预览' : ''"
+              @click="currentItem?.resultUrl && openPreviewModal('result')"
+            >
               <div class="view-tag result-tag">去水印效果</div>
+              <div v-if="currentItem?.resultUrl" class="card-action-hint highlight">
+                <n-icon :component="ExpandOutline" size="14" /> 点击弹窗高清对比
+              </div>
               <div class="view-content">
-                <img
-                  v-if="currentItem?.resultUrl"
-                  :src="currentItem.resultUrl"
-                  alt="result"
-                />
+                <div v-if="currentItem?.resultUrl" class="result-image-wrapper">
+                  <img :src="currentItem.resultUrl" alt="result" />
+                  <div class="image-hover-mask">
+                    <div class="mask-badge">
+                      <n-icon :component="EyeOutline" size="18" />
+                      <span>点击全屏弹窗预览</span>
+                    </div>
+                  </div>
+                </div>
                 <div v-else class="status-placeholder">
                   <n-spin v-if="currentItem?.status === 'processing'" size="large" />
                   <div v-else-if="currentItem?.status === 'error'" class="error-box">
@@ -488,6 +641,169 @@ const saveAllResults = () => {
         </div>
       </div>
     </div>
+
+    <!-- 高清弹窗预览模态框 -->
+    <n-modal
+      v-model:show="isPreviewOpen"
+      preset="card"
+      style="width: 92vw; max-width: 1400px; height: 90vh; border-radius: 16px; display: flex; flex-direction: column;"
+      content-style="flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0; overflow: hidden;"
+      :bordered="false"
+      size="small"
+      :segmented="{ content: true, footer: true }"
+    >
+      <template #header>
+        <div class="modal-header-box">
+          <div class="m-left">
+            <span class="m-title">{{ currentItem?.name }}</span>
+            <n-tag v-if="currentItem?.status === 'done'" type="success" size="tiny" round>
+              去水印完成
+            </n-tag>
+            <span class="m-counter">({{ selectedIndex + 1 }} / {{ imageList.length }})</span>
+          </div>
+
+          <!-- 模式切换 -->
+          <div class="m-center">
+            <n-radio-group v-model:value="previewMode" size="small">
+              <n-radio-button value="result" :disabled="!currentItem?.resultUrl">
+                ✨ 去水印高清效果
+              </n-radio-button>
+              <n-radio-button value="compare" :disabled="!currentItem?.resultUrl">
+                🌗 左右双屏对比
+              </n-radio-button>
+              <n-radio-button value="original">
+                📄 原始图片
+              </n-radio-button>
+            </n-radio-group>
+          </div>
+
+          <!-- 缩放控制与单张下载 -->
+          <div class="m-right">
+            <n-button-group size="tiny">
+              <n-button secondary @click="handleZoomOut">- 缩小</n-button>
+              <n-button secondary @click="handleZoomReset">{{ Math.round(zoomScale * 100) }}%</n-button>
+              <n-button secondary @click="handleZoomIn">+ 放大</n-button>
+            </n-button-group>
+
+            <n-button
+              v-if="currentItem?.resultUrl"
+              type="primary"
+              size="tiny"
+              @click="saveCurrentResult"
+            >
+              <template #icon><n-icon :component="DownloadOutline" /></template>
+              下载本图
+            </n-button>
+          </div>
+        </div>
+      </template>
+
+      <!-- 弹窗主视口 (支持鼠标拖拽平移、滚轮缩放、双击放大/重置) -->
+      <div
+        class="modal-viewer-body"
+        :class="{ 'is-grabbing': isDragging, 'is-zoomed': zoomScale > 1 }"
+        @wheel="handleViewerWheel"
+        @mousedown="handleMouseDown"
+        @mousemove="handleMouseMove"
+        @mouseup="handleMouseUp"
+        @mouseleave="handleMouseUp"
+        @dblclick="handleDoubleClick"
+      >
+        <!-- 浮动左翻页按钮 -->
+        <button
+          v-if="imageList.length > 1"
+          class="nav-btn prev-btn"
+          :disabled="selectedIndex === 0"
+          title="上一张图片 (←)"
+          @click.stop="prevPreviewImage"
+        >
+          <n-icon size="24" :component="ChevronBackOutline" />
+        </button>
+
+        <!-- 模式 1：去水印高清结果图 -->
+        <div v-if="previewMode === 'result'" class="single-viewer-container">
+          <div
+            class="zoomable-wrapper"
+            :style="{ transform: `translate(${panX}px, ${panY}px) scale(${zoomScale})` }"
+          >
+            <img
+              v-if="currentItem?.resultUrl"
+              :src="currentItem.resultUrl"
+              class="modal-main-img"
+              alt="result-large"
+              draggable="false"
+            />
+          </div>
+        </div>
+
+        <!-- 模式 2：左右双屏对比 (双屏同频平移与缩放) -->
+        <div v-else-if="previewMode === 'compare'" class="compare-viewer-container">
+          <div class="compare-col">
+            <div class="col-tag">原始原图</div>
+            <div
+              class="col-zoomable"
+              :style="{ transform: `translate(${panX}px, ${panY}px) scale(${zoomScale})` }"
+            >
+              <img
+                :src="currentItem?.previewUrl"
+                class="modal-compare-img"
+                alt="orig-compare"
+                draggable="false"
+              />
+            </div>
+          </div>
+          <div class="compare-divider" />
+          <div class="compare-col">
+            <div class="col-tag result-col-tag">去水印效果</div>
+            <div
+              class="col-zoomable"
+              :style="{ transform: `translate(${panX}px, ${panY}px) scale(${zoomScale})` }"
+            >
+              <img
+                v-if="currentItem?.resultUrl"
+                :src="currentItem.resultUrl"
+                class="modal-compare-img"
+                alt="res-compare"
+                draggable="false"
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- 模式 3：原始高清图 -->
+        <div v-else-if="previewMode === 'original'" class="single-viewer-container">
+          <div
+            class="zoomable-wrapper"
+            :style="{ transform: `translate(${panX}px, ${panY}px) scale(${zoomScale})` }"
+          >
+            <img
+              :src="currentItem?.previewUrl"
+              class="modal-main-img"
+              alt="orig-large"
+              draggable="false"
+            />
+          </div>
+        </div>
+
+        <!-- 浮动右翻页按钮 -->
+        <button
+          v-if="imageList.length > 1"
+          class="nav-btn next-btn"
+          :disabled="selectedIndex === imageList.length - 1"
+          title="下一张图片 (→)"
+          @click.stop="nextPreviewImage"
+        >
+          <n-icon size="24" :component="ChevronForwardOutline" />
+        </button>
+      </div>
+
+      <template #footer>
+        <div class="modal-footer-box">
+          <span class="tip-text">💡 提示：支持鼠标滚轮直接缩放；点击上方选项随时切换双屏/单图对比；点击左右箭头可切换上一张/下一张</span>
+          <n-button size="small" @click="isPreviewOpen = false">关闭预览</n-button>
+        </div>
+      </template>
+    </n-modal>
   </div>
 </template>
 
@@ -873,5 +1189,298 @@ const saveAllResults = () => {
   gap: 6px;
   color: #ef4444;
   font-size: 13px;
+}
+
+.clickable-card {
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.clickable-card:hover {
+  border-color: #38bdf8;
+  box-shadow: 0 8px 20px -4px rgba(2, 132, 199, 0.15);
+}
+
+.card-action-hint {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  background: rgba(241, 245, 249, 0.9);
+  color: #475569;
+  z-index: 2;
+  transition: all 0.2s ease;
+  pointer-events: none;
+}
+
+.card-action-hint.highlight {
+  background: rgba(224, 242, 254, 0.95);
+  color: #0369a1;
+  font-weight: 600;
+}
+
+.clickable-card:hover .card-action-hint {
+  background: #0284c7;
+  color: #ffffff;
+}
+
+.result-image-wrapper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.image-hover-mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  border-radius: 6px;
+}
+
+.result-image-wrapper:hover .image-hover-mask {
+  opacity: 1;
+}
+
+.mask-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #ffffff;
+  color: #0f172a;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+  transform: translateY(4px);
+  transition: transform 0.2s ease;
+}
+
+.result-image-wrapper:hover .mask-badge {
+  transform: translateY(0);
+}
+
+/* 弹窗预览模态框样式 */
+.modal-header-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 16px;
+}
+
+.m-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.m-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+  max-width: 320px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.m-counter {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.m-center {
+  display: flex;
+  align-items: center;
+}
+
+.m-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.modal-viewer-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: #0f172a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  cursor: grab;
+  user-select: none;
+}
+
+.modal-viewer-body.is-grabbing {
+  cursor: grabbing;
+}
+
+.modal-viewer-body img {
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+
+/* 浮动翻页按钮 */
+.nav-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 10;
+  transition: all 0.2s ease;
+}
+
+.nav-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.4);
+  transform: translateY(-50%) scale(1.08);
+}
+
+.nav-btn:disabled {
+  opacity: 0.2;
+  cursor: not-allowed;
+}
+
+.prev-btn {
+  left: 20px;
+}
+
+.next-btn {
+  right: 20px;
+}
+
+/* 单图预览视口 */
+.single-viewer-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  overflow: auto;
+}
+
+.zoomable-wrapper {
+  transition: transform 0.15s ease-out;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-main-img {
+  max-width: 82vw;
+  max-height: 72vh;
+  object-fit: contain;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+/* 左右双屏对比视口 */
+.compare-viewer-container {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  padding: 20px;
+  gap: 16px;
+  align-items: center;
+  overflow: hidden;
+}
+
+.compare-col {
+  height: 100%;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.col-tag {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(0, 0, 0, 0.65);
+  color: #ffffff;
+  z-index: 2;
+  backdrop-filter: blur(4px);
+}
+
+.result-col-tag {
+  background: rgba(2, 132, 199, 0.85);
+}
+
+.col-zoomable {
+  transition: transform 0.15s ease-out;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 16px;
+}
+
+.modal-compare-img {
+  max-width: 100%;
+  max-height: 68vh;
+  object-fit: contain;
+  border-radius: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  background: #ffffff;
+}
+
+.compare-divider {
+  width: 1px;
+  height: 80%;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.modal-footer-box {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.tip-text {
+  font-size: 12px;
+  color: #64748b;
 }
 </style>

@@ -4,6 +4,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { setupAutoUpdater } from './updater'
 import { initPythonBridge } from './pythonBridge'
+import { setupModelManagerIPC } from './modelManager'
 
 function createWindow(): void {
   // Create the browser window.
@@ -58,8 +59,81 @@ app.whenReady().then(async () => {
   // IPC test
   ipcMain.on('ping', () => console.log('pong'))
 
+  // 注册原生文件/文件夹选择与批量保存 IPC
+  ipcMain.handle('dialog:select-directory', async () => {
+    const { dialog } = await import('electron')
+    const result = await dialog.showOpenDialog({
+      title: '选择导出保存目录',
+      properties: ['openDirectory', 'createDirectory']
+    })
+    if (result.canceled || result.filePaths.length === 0) {
+      return null
+    }
+    return result.filePaths[0]
+  })
+
+  ipcMain.handle('dialog:select-pdf-files', async (_, multiple = true) => {
+    const { dialog } = await import('electron')
+    const properties: Array<'openFile' | 'multiSelections'> = ['openFile']
+    if (multiple) {
+      properties.push('multiSelections')
+    }
+    const result = await dialog.showOpenDialog({
+      title: '选择 PDF 文件',
+      filters: [{ name: 'PDF 文档', extensions: ['pdf'] }],
+      properties
+    })
+    if (result.canceled || result.filePaths.length === 0) {
+      return []
+    }
+    return result.filePaths
+  })
+
+  ipcMain.handle('dialog:save-file', async (_, options: { defaultPath?: string; filters?: Array<{ name: string; extensions: string[] }> }) => {
+    const { dialog } = await import('electron')
+    const result = await dialog.showSaveDialog({
+      title: '保存 PDF 文件',
+      defaultPath: options.defaultPath || 'merged_document.pdf',
+      filters: options.filters || [{ name: 'PDF 文档', extensions: ['pdf'] }]
+    })
+    if (result.canceled || !result.filePath) {
+      return null
+    }
+    return result.filePath
+  })
+
+  ipcMain.handle('file:save-batch', async (_, { dirPath, items }: { dirPath: string; items: Array<{ name: string; base64: string }> }) => {
+    const fs = await import('fs/promises')
+    const path = await import('path')
+    const savedPaths: string[] = []
+
+    for (const item of items) {
+      let b64 = item.base64
+      if (b64.includes(',')) {
+        b64 = b64.split(',')[1]
+      }
+      const buffer = Buffer.from(b64, 'base64')
+      const targetPath = path.join(dirPath, item.name)
+      await fs.writeFile(targetPath, buffer)
+      savedPaths.push(targetPath)
+    }
+    return { success: true, count: savedPaths.length, dirPath }
+  })
+
+  ipcMain.handle('shell:open-path', async (_, targetPath: string) => {
+    return await shell.openPath(targetPath)
+  })
+
+  ipcMain.handle('shell:show-item-in-folder', async (_, targetPath: string) => {
+    shell.showItemInFolder(targetPath)
+    return true
+  })
+
   // 启动 Python 核心服务 (管道模式)
   initPythonBridge()
+
+  // 注册 AI 模型管理中心 IPC
+  setupModelManagerIPC()
 
   createWindow()
 
