@@ -95,56 +95,6 @@ const menuOptions: MenuOption[] = [
     ]
   },
   {
-    label: '三、成绩与数据统计',
-    key: 'cat-grade',
-    children: [
-      {
-        label: renderLabel('成绩单自动统计', '/grade/stat'),
-        key: 'grade/stat'
-      },
-      {
-        label: renderLabel('成绩趋势图表', '/grade/chart'),
-        key: 'grade/chart'
-      },
-      {
-        label: renderLabel('试题正确率分析', '/grade/accuracy'),
-        key: 'grade/accuracy'
-      }
-    ]
-  },
-  {
-    label: '四、化学学科专用小工具',
-    key: 'cat-chemistry',
-    children: [
-      {
-        label: renderLabel('化学方程式配平助手', '/chemistry/balancer'),
-        key: 'chemistry/balancer'
-      },
-      {
-        label: renderLabel('元素周期表速查', '/chemistry/periodic-table'),
-        key: 'chemistry/periodic-table'
-      },
-      {
-        label: renderLabel('分子结构图库', '/chemistry/molecule'),
-        key: 'chemistry/molecule'
-      },
-      {
-        label: renderLabel('实验安全/步骤清单', '/chemistry/lab-safety'),
-        key: 'chemistry/lab-safety'
-      }
-    ]
-  },
-  {
-    label: '五、课件生成类',
-    key: 'cat-courseware',
-    children: [
-      {
-        label: renderLabel('说课/课件PPT生成', '/courseware'),
-        key: 'courseware'
-      }
-    ]
-  },
-  {
     type: 'divider',
     key: 'd2'
   },

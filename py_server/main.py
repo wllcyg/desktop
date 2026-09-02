@@ -255,6 +255,22 @@ def handle_pdf_reorganize(params: dict) -> dict:
     )
 
 
+import services.rename_service
+
+def handle_file_batch_rename(params: dict) -> dict:
+    """批量文件重命名 (含占用捕获与隔离)"""
+    importlib.reload(services.rename_service)
+    rename_pairs = params.get("pairs", [])
+    return services.rename_service.batch_rename_files(rename_pairs)
+
+
+def handle_file_undo_rename(params: dict) -> dict:
+    """一键撤销重命名"""
+    importlib.reload(services.rename_service)
+    records = params.get("records", [])
+    return services.rename_service.undo_rename_files(records)
+
+
 METHODS = {
     "ping": handle_ping,
     "model.verify_and_start": handle_verify_and_start_model,
@@ -268,6 +284,8 @@ METHODS = {
     "pdf.merge": handle_pdf_merge,
     "pdf.split": handle_pdf_split,
     "pdf.reorganize": handle_pdf_reorganize,
+    "file.batch_rename": handle_file_batch_rename,
+    "file.undo_rename": handle_file_undo_rename,
 }
 
 

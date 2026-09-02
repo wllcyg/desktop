@@ -53,23 +53,6 @@ const categories = [
       { name: '按班级学号归类', route: '/batch/classify' },
       { name: 'Word/Excel模板填充', route: '/batch/template-fill' }
     ]
-  },
-  {
-    name: '三、成绩与数据统计类',
-    items: [
-      { name: '成绩单自动统计', route: '/grade/stat' },
-      { name: '成绩趋势图表', route: '/grade/chart' },
-      { name: '试题正确率分析', route: '/grade/accuracy' }
-    ]
-  },
-  {
-    name: '四、化学学科专用小工具',
-    items: [
-      { name: '化学方程式配平助手', route: '/chemistry/balancer' },
-      { name: '元素周期表速查', route: '/chemistry/periodic-table' },
-      { name: '分子结构图库', route: '/chemistry/molecule' },
-      { name: '实验安全/步骤清单', route: '/chemistry/lab-safety' }
-    ]
   }
 ]
 

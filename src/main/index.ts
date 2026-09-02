@@ -72,6 +72,22 @@ app.whenReady().then(async () => {
     return result.filePaths[0]
   })
 
+  ipcMain.handle('dialog:select-any-files', async (_, multiple = true) => {
+    const { dialog } = await import('electron')
+    const properties: Array<'openFile' | 'multiSelections'> = ['openFile']
+    if (multiple) {
+      properties.push('multiSelections')
+    }
+    const result = await dialog.showOpenDialog({
+      title: '选择待重命名的文件',
+      properties
+    })
+    if (result.canceled || result.filePaths.length === 0) {
+      return []
+    }
+    return result.filePaths
+  })
+
   ipcMain.handle('dialog:select-pdf-files', async (_, multiple = true) => {
     const { dialog } = await import('electron')
     const properties: Array<'openFile' | 'multiSelections'> = ['openFile']
