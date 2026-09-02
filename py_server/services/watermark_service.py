@@ -17,35 +17,97 @@ def remove_light_watermark(
     threshold: int = 200,
     contrast: float = 1.5,
     denoise: bool = True,
-    mode: str = "binary",
+    mode: str = "bg_normalize",
 ) -> np.ndarray:
     """
-    试卷/课件平铺浅色文字水印消除算法
-
-    核心原理：水印颜色浅（灰度高），题目文字颜色深（灰度低），
-    通过阈值分割将浅色水印像素推为纯白，保留深色字迹。
+    试卷/课件平铺浅色文字水印消除算法 (业界优秀算法融合版)
 
     Args:
         img: 输入图片 (BGR)
-        threshold: 灰度阈值 (0-255)，值越小去水印越激进，默认 200
-        contrast: 对比度增强倍数，默认 1.5
-        denoise: 是否做轻微降噪平滑
-        mode: 处理模式
-              - "binary": 简单全局二值化（速度最快，适合黑白试卷）
-              - "adaptive": 自适应阈值（适合光照不均匀的拍照试卷）
-              - "color_filter": 色彩通道过滤（适合彩色水印如浅蓝/浅红）
-
-    Returns:
-        处理后的图片 (BGR)
+        threshold: 灰度/灵敏度阈值 (0-255)
+        contrast: 对比度增强倍数
+        denoise: 是否做降噪平滑
+        mode:
+          - "bg_normalize": 扫描全能王同款背景光照归一化 (自适应光线，平铺水印消除效果最佳)
+          - "binary": 全局二值化 (标准黑白试卷)
+          - "adaptive": 自适应局部阈值 (拍照试卷)
+          - "color_filter": 色彩通道过滤 (浅蓝/彩色水印)
+          - "remove_red": 专属去除红色印章与红笔批改
     """
-    if mode == "binary":
-        return _remove_by_binary_threshold(img, threshold, contrast, denoise)
+    if mode == "bg_normalize":
+        return _remove_by_bg_normalization(img, threshold, contrast, denoise)
+    elif mode == "remove_red":
+        return _remove_red_stamp_and_marks(img, threshold, contrast)
     elif mode == "adaptive":
         return _remove_by_adaptive_threshold(img, contrast, denoise)
     elif mode == "color_filter":
         return _remove_by_color_filter(img, threshold, contrast, denoise)
     else:
         return _remove_by_binary_threshold(img, threshold, contrast, denoise)
+
+
+def _remove_by_bg_normalization(
+    img: np.ndarray, threshold: int, contrast: float, denoise: bool
+) -> np.ndarray:
+    """
+    【优秀算法 1】：大核背景光照归一化 (扫描全能王同款原理)
+    通过形态学闭运算提取纸张背景照度，利用 原图/背景 消除平铺浅色水印，增强题目黑度
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # 1. 动态核大小估计背景照度 (大核消除文字只留背景底色与大面积阴影)
+    k_size = max(21, (min(img.shape[:2]) // 30) | 1)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k_size, k_size))
+    bg = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, kernel)
+
+    # 2. 归一化相除：消除背景光照不均与浅色平铺文字
+    normalized = cv2.divide(gray, bg, scale=255)
+
+    # 3. 浅色水印推入纯白
+    if threshold < 250:
+        _, binary = cv2.threshold(normalized, threshold, 255, cv2.THRESH_BINARY)
+    else:
+        binary = normalized
+
+    # 4. 对比度增强与微弱锐化
+    enhanced = cv2.convertScaleAbs(binary, alpha=contrast, beta=0)
+
+    if denoise:
+        k_clean = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+        enhanced = cv2.morphologyEx(enhanced, cv2.MORPH_CLOSE, k_clean)
+
+    return cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
+
+
+def _remove_red_stamp_and_marks(
+    img: np.ndarray, sensitivity: int = 40, contrast: float = 1.2
+) -> np.ndarray:
+    """
+    【优秀算法 2】：RGB 通道差分精准提取红色印章/红笔批改并还原
+    原理：黑色文字 R≈G≈B (R-G≈0)，红色印章 R>>G (R-G>40)
+    """
+    b, g, r = cv2.split(img)
+
+    # 提取红色偏色差分图
+    diff = cv2.subtract(r, g)
+
+    # 生成红色印章/红笔专属掩膜
+    thresh_val = max(20, min(100, 255 - sensitivity))
+    _, red_mask = cv2.threshold(diff, thresh_val, 255, cv2.THRESH_BINARY)
+
+    # 形态学微膨胀，完整包裹红笔毛刺边缘
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    red_mask = cv2.dilate(red_mask, kernel, iterations=1)
+
+    # 对红色区域进行智能填白与局部修补
+    result = img.copy()
+    result[red_mask == 255] = [255, 255, 255]
+
+    # 对比度微调
+    if contrast != 1.0:
+        result = cv2.convertScaleAbs(result, alpha=contrast, beta=0)
+
+    return result
 
 
 def _remove_by_binary_threshold(

@@ -15,7 +15,8 @@ const isProcessing = ref(false)
 const threshold = ref(200)
 const contrast = ref(1.5)
 const denoise = ref(true)
-const mode = ref<string>('binary')
+// 默认使用最优秀的背景归一化算法
+const mode = ref<string>('bg_normalize')
 const inpaintRadius = ref(5)
 const inpaintMethod = ref<string>('telea')
 
@@ -106,9 +107,11 @@ const saveResult = () => {
 
 // 模式选项
 const modeOptions = [
-  { label: '全局二值化 (黑白试卷最佳)', value: 'binary' },
-  { label: '自适应阈值 (拍照试卷)', value: 'adaptive' },
-  { label: '色彩通道过滤 (彩色水印)', value: 'color_filter' }
+  { label: '✨ 智能背景归一化 (扫描全能王算法，平铺水印推荐)', value: 'bg_normalize' },
+  { label: '🔴 红色印章 / 批改红叉消除 (色彩差分算法)', value: 'remove_red' },
+  { label: '📄 标准二值化 (黑白试卷)', value: 'binary' },
+  { label: '📱 自适应局部阈值 (拍照试卷)', value: 'adaptive' },
+  { label: '🎨 色彩通道过滤 (浅蓝/彩色水印)', value: 'color_filter' }
 ]
 
 const methodOptions = [
