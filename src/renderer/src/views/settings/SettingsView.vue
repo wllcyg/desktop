@@ -64,7 +64,7 @@ onUnmounted(() => {
         <div class="setting-item">
           <div class="setting-label">
             <span class="setting-title">自动更新与版本</span>
-            <span class="setting-desc">工具箱 v0.1.0 (Windows x64) · {{ updateStatusText }}</span>
+            <span class="setting-desc">工具箱 v0.1.1 · {{ updateStatusText }}</span>
           </div>
           <div class="setting-action">
             <n-button
