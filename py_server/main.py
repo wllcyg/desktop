@@ -11,12 +11,15 @@ import base64
 import traceback
 
 # 强制将标准输入输出流设置为 UTF-8 编码，防止 Windows 控制台乱码
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8")
-if hasattr(sys.stderr, "reconfigure"):
-    sys.stderr.reconfigure(encoding="utf-8")
-if hasattr(sys.stdin, "reconfigure"):
-    sys.stdin.reconfigure(encoding="utf-8")
+try:
+    if hasattr(sys.stdout, "reconfigure") and sys.stdout is not None:
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure") and sys.stderr is not None:
+        sys.stderr.reconfigure(encoding="utf-8")
+    if hasattr(sys.stdin, "reconfigure") and sys.stdin is not None:
+        sys.stdin.reconfigure(encoding="utf-8")
+except Exception:
+    pass
 
 import cv2
 import numpy as np

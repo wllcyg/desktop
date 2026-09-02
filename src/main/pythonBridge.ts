@@ -8,7 +8,7 @@
 
 import { ChildProcess, spawn } from 'child_process'
 import { app, ipcMain } from 'electron'
-import { join } from 'path'
+import { join, dirname } from 'path'
 import { existsSync } from 'fs'
 import { createInterface } from 'readline'
 import { is } from '@electron-toolkit/utils'
@@ -56,15 +56,20 @@ function getPyServerCommand(): { command: string; args: string[]; cwd: string } 
       join(process.resourcesPath, 'py_server', 'server', 'server.exe'),
       join(process.resourcesPath, 'py_server', 'server.exe'),
       join(process.resourcesPath, 'py_server', 'server', 'server'),
-      join(process.resourcesPath, 'py_server', 'server')
+      join(process.resourcesPath, 'py_server', 'server'),
+      join(app.getAppPath(), '..', 'py_server', 'server', 'server.exe'),
+      join(app.getAppPath(), '..', 'py_server', 'server.exe'),
+      join(app.getAppPath(), '..', '..', 'resources', 'py_server', 'server', 'server.exe')
     ]
 
     for (const exe of possibleExes) {
       if (existsSync(exe)) {
-        return { command: exe, args: [], cwd: join(process.resourcesPath, 'py_server') }
+        console.log(`[PythonBridge] Found packaged Python executable: ${exe}`)
+        return { command: exe, args: [], cwd: dirname(exe) }
       }
     }
 
+    console.warn(`[PythonBridge] No packaged Python executable found in resourcesPath: ${process.resourcesPath}`)
     const scriptPath = join(process.resourcesPath, 'py_server', 'main.py')
     return { command: 'python', args: [scriptPath], cwd: join(process.resourcesPath, 'py_server') }
   }
@@ -91,6 +96,7 @@ export function initPythonBridge(): Promise<boolean> {
       pyProcess = spawn(command, args, {
         cwd,
         stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
         env: {
           ...process.env,
           PYTHONIOENCODING: 'utf-8',
