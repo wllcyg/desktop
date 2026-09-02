@@ -146,7 +146,7 @@ export function initPythonBridge(): Promise<boolean> {
         console.log(`[PythonBridge] Process exited, code=${code}`)
         isReady = false
         // 拒绝所有未决请求
-        for (const [id, pending] of pendingRequests.entries()) {
+        for (const pending of pendingRequests.values()) {
           clearTimeout(pending.timer)
           pending.reject(new Error('Python process exited'))
         }
@@ -154,13 +154,13 @@ export function initPythonBridge(): Promise<boolean> {
         pyProcess = null
       })
 
-      // 5 秒超时保护
+      // 20 秒超时保护 (给初次冷启动导包预留充足时间)
       setTimeout(() => {
         if (!isReady) {
           console.warn('[PythonBridge] Timeout waiting for ready event')
           resolve(false)
         }
-      }, 5000)
+      }, 20000)
     } catch (err) {
       console.error('[PythonBridge] spawn error:', err)
       resolve(false)

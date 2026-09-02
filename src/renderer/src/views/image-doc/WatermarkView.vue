@@ -112,6 +112,16 @@ const removeItem = (index: number, e: Event) => {
   }
 }
 
+// 将 File 对象转换为 Base64 字符串辅助函数
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = (err) => reject(err)
+    reader.readAsDataURL(file)
+  })
+}
+
 // 执行全自动去水印 (支持批量流水线)
 const startAutoRemoval = async () => {
   if (imageList.value.length === 0) {
@@ -131,7 +141,12 @@ const startAutoRemoval = async () => {
       selectedIndex.value = i
 
       try {
-        const inputSource = item.path || item.previewUrl
+        // 优先使用本地磁盘绝对路径，否则转为 Base64 字符串
+        let inputSource = item.path
+        if (!inputSource || !inputSource.includes(':')) {
+          inputSource = await fileToBase64(item.file)
+        }
+
         const res = await window.electron.ipcRenderer.invoke('py:call', {
           method: 'watermark.auto_remove',
           params: {
