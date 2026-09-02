@@ -1,7 +1,7 @@
 {
-  "name": "teacher-toolbox",
+  "name": "toolbox",
   "version": "1.0.0",
-  "description": "教师工具箱 - 面向初中化学老师日常备课/教学场景的桌面工具",
+  "description": "工具箱 - 桌面小工具集合",
   "main": "./out/main/index.js",
   "author": "example.com",
   "homepage": "https://electron-vite.org",

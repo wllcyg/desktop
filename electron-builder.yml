@@ -1,5 +1,5 @@
-appId: com.teacher.toolbox
-productName: 教师工具箱
+appId: com.app.toolbox
+productName: 工具箱
 directories:
   buildResources: build
 files:
@@ -12,7 +12,7 @@ files:
 asarUnpack:
   - resources/**
 win:
-  executableName: 教师工具箱
+  executableName: 工具箱
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}

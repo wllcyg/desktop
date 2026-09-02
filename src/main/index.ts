@@ -11,7 +11,7 @@ function createWindow(): void {
     height: 720,
     show: false,
     autoHideMenuBar: true,
-    title: '教师工具箱',
+    title: '工具箱',
     icon,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -45,7 +45,7 @@ function createWindow(): void {
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
   // Set app user model id for windows
-  electronApp.setAppUserModelId('com.teacher.toolbox')
+  electronApp.setAppUserModelId('com.app.toolbox')
 
   // Default open or close DevTools by F12 in development
   // and ignore CommandOrControl + R in production.
