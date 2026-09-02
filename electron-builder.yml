@@ -16,6 +16,10 @@ extraResources:
     to: py_server
     filter:
       - '**/*'
+  - from: resources/models
+    to: models
+    filter:
+      - '**/*'
 win:
   executableName: 工具箱
 nsis:

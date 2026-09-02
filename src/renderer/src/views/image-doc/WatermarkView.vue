@@ -1,6 +1,18 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useMessage } from 'naive-ui'
+import {
+  SparklesOutline,
+  DownloadOutline,
+  CloudUploadOutline,
+  AddOutline,
+  TrashOutline,
+  CloseOutline,
+  SettingsOutline,
+  CheckmarkCircleOutline,
+  ImagesOutline,
+  AlertCircleOutline
+} from '@vicons/ionicons5'
 
 const message = useMessage()
 
@@ -231,12 +243,26 @@ const saveAllResults = () => {
       </div>
       <div class="bar-right">
         <n-button
+          v-if="completedCount > 0"
+          type="primary"
+          size="small"
+          @click="saveAllResults"
+        >
+          <template #icon>
+            <n-icon :component="DownloadOutline" />
+          </template>
+          一键下载全部 ({{ completedCount }})
+        </n-button>
+        <n-button
           v-if="imageList.length > 0"
           size="small"
           quaternary
           @click="showAdvanced = !showAdvanced"
         >
-          ⚙️ {{ showAdvanced ? '收起微调' : '参数微调' }}
+          <template #icon>
+            <n-icon :component="SettingsOutline" />
+          </template>
+          {{ showAdvanced ? '收起微调' : '参数微调' }}
         </n-button>
         <n-button
           v-if="imageList.length > 0"
@@ -246,6 +272,9 @@ const saveAllResults = () => {
           :disabled="isBatchProcessing"
           @click="clearAll"
         >
+          <template #icon>
+            <n-icon :component="TrashOutline" />
+          </template>
           清空列表
         </n-button>
       </div>
@@ -281,10 +310,13 @@ const saveAllResults = () => {
         @click="triggerFileSelect"
       >
         <div class="empty-content">
-          <div class="empty-icon">📁</div>
+          <n-icon size="64" color="#94a3b8" :component="CloudUploadOutline" />
           <div class="empty-title">点击或拖拽图片到此处</div>
           <div class="empty-desc">支持单张或批量拖入多份试卷、课件图片 (JPG / PNG / WebP)</div>
           <n-button type="primary" size="large" class="upload-btn">
+            <template #icon>
+              <n-icon :component="AddOutline" />
+            </template>
             选择图片文件 (支持批量)
           </n-button>
         </div>
@@ -304,7 +336,25 @@ const saveAllResults = () => {
               :loading="isBatchProcessing"
               @click="startAutoRemoval"
             >
-              ✨ 智能一键去水印 ({{ imageList.length }} 张)
+              <template #icon>
+                <n-icon :component="SparklesOutline" />
+              </template>
+              智能一键去水印 ({{ imageList.length }} 张)
+            </n-button>
+
+            <!-- 显著的一键下载全部按钮 -->
+            <n-button
+              v-if="completedCount > 0"
+              type="success"
+              block
+              size="medium"
+              class="download-all-btn"
+              @click="saveAllResults"
+            >
+              <template #icon>
+                <n-icon :component="DownloadOutline" />
+              </template>
+              一键下载全部图片 ({{ completedCount }})
             </n-button>
 
             <div class="btn-row">
@@ -314,16 +364,10 @@ const saveAllResults = () => {
                 :disabled="isBatchProcessing"
                 @click="triggerFileSelect"
               >
-                + 添加更多
-              </n-button>
-              <n-button
-                v-if="completedCount > 0"
-                type="success"
-                secondary
-                block
-                @click="saveAllResults"
-              >
-                📦 全部保存 ({{ completedCount }})
+                <template #icon>
+                  <n-icon :component="AddOutline" />
+                </template>
+                添加更多
               </n-button>
             </div>
           </div>
@@ -331,7 +375,10 @@ const saveAllResults = () => {
           <!-- 图片队列列表 -->
           <div class="queue-list-container">
             <div class="queue-header">
-              <span class="queue-title">图片列表 ({{ imageList.length }})</span>
+              <div class="queue-title-row">
+                <n-icon :component="ImagesOutline" />
+                <span class="queue-title">图片列表 ({{ imageList.length }})</span>
+              </div>
               <span class="queue-count">已完成: {{ completedCount }}/{{ imageList.length }}</span>
             </div>
 
@@ -349,9 +396,17 @@ const saveAllResults = () => {
                 <div class="item-info">
                   <span class="item-name">{{ item.name }}</span>
                   <div class="item-status">
-                    <n-tag v-if="item.status === 'done'" size="tiny" type="success" round>已完成</n-tag>
-                    <n-tag v-else-if="item.status === 'processing'" size="tiny" type="info" round>处理中...</n-tag>
-                    <n-tag v-else-if="item.status === 'error'" size="tiny" type="error" round>失败</n-tag>
+                    <n-tag v-if="item.status === 'done'" size="tiny" type="success" round>
+                      <template #icon><n-icon :component="CheckmarkCircleOutline" /></template>
+                      已完成
+                    </n-tag>
+                    <n-tag v-else-if="item.status === 'processing'" size="tiny" type="info" round>
+                      处理中...
+                    </n-tag>
+                    <n-tag v-else-if="item.status === 'error'" size="tiny" type="error" round>
+                      <template #icon><n-icon :component="AlertCircleOutline" /></template>
+                      失败
+                    </n-tag>
                     <n-tag v-else size="tiny" depth="3" round>待处理</n-tag>
                   </div>
                 </div>
@@ -362,7 +417,9 @@ const saveAllResults = () => {
                   class="del-btn"
                   @click="(e) => removeItem(index, e)"
                 >
-                  ✕
+                  <template #icon>
+                    <n-icon :component="CloseOutline" />
+                  </template>
                 </n-button>
               </div>
             </div>
@@ -375,6 +432,7 @@ const saveAllResults = () => {
             <div class="vp-left">
               <span class="vp-title">{{ currentItem?.name }}</span>
               <n-tag v-if="currentItem?.status === 'done'" type="success" size="small" round>
+                <template #icon><n-icon :component="CheckmarkCircleOutline" /></template>
                 去水印成功
               </n-tag>
             </div>
@@ -382,11 +440,13 @@ const saveAllResults = () => {
               <n-button
                 v-if="currentItem?.resultUrl"
                 type="primary"
-                secondary
                 size="small"
                 @click="saveCurrentResult"
               >
-                💾 保存当前图片
+                <template #icon>
+                  <n-icon :component="DownloadOutline" />
+                </template>
+                一键下载当前图片
               </n-button>
             </div>
           </div>
@@ -413,11 +473,12 @@ const saveAllResults = () => {
                 <div v-else class="status-placeholder">
                   <n-spin v-if="currentItem?.status === 'processing'" size="large" />
                   <div v-else-if="currentItem?.status === 'error'" class="error-box">
+                    <n-icon size="32" :component="AlertCircleOutline" />
                     <span>处理失败</span>
                     <n-text depth="3">{{ currentItem?.errorMsg }}</n-text>
                   </div>
                   <div v-else class="pending-box">
-                    <span class="magic-icon">✨</span>
+                    <n-icon size="40" color="#0284c7" :component="SparklesOutline" />
                     <span>点击左侧【智能一键去水印】即可处理</span>
                   </div>
                 </div>
@@ -530,10 +591,6 @@ const saveAllResults = () => {
   gap: 10px;
 }
 
-.empty-icon {
-  font-size: 56px;
-}
-
 .empty-title {
   font-size: 18px;
   font-weight: 600;
@@ -586,6 +643,12 @@ const saveAllResults = () => {
   box-shadow: 0 4px 12px -2px rgba(2, 132, 199, 0.35);
 }
 
+.download-all-btn {
+  font-weight: 600;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px -2px rgba(22, 163, 74, 0.35);
+}
+
 .btn-row {
   display: flex;
   gap: 8px;
@@ -608,6 +671,12 @@ const saveAllResults = () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.queue-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .queue-title {
@@ -788,15 +857,11 @@ const saveAllResults = () => {
   color: #94a3b8;
 }
 
-.magic-icon {
-  font-size: 32px;
-}
-
 .pending-box {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 13px;
   color: #64748b;
 }
@@ -805,6 +870,7 @@ const saveAllResults = () => {
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 6px;
   color: #ef4444;
   font-size: 13px;
 }

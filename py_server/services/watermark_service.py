@@ -79,15 +79,31 @@ def auto_remove_watermark(
     return cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
 
 
+from services.lama_inpaint import lama_inpaint, is_lama_available
+
+
 def inpaint_with_mask(
     img: np.ndarray,
     mask: np.ndarray,
     radius: int = 5,
-    method: str = "telea",
+    method: str = "lama",
 ) -> np.ndarray:
     """
-    交互式画笔涂抹修补算法 (用于去除角落特定 LOGO 或大面积污渍)
+    画笔涂抹智能修补算法
+
+    支持模式：
+    - "lama": LaMa AI 深度学习神经网络修复 (自动脑补纹理，画质最佳)
+    - "telea": OpenCV Telea 快速行进算法
+    - "ns": OpenCV Navier-Stokes 流体扩散算法
     """
+    # 优先使用 LaMa AI 深度修复模型
+    if method == "lama" or is_lama_available():
+        try:
+            return lama_inpaint(img, mask)
+        except Exception as e:
+            print(f"[WatermarkService] LaMa 推理异常，自动降级为 OpenCV: {e}")
+
+    # 优雅降级为传统 OpenCV 算法
     if len(mask.shape) == 3:
         mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
 
