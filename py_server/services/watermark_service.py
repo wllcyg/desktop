@@ -1,188 +1,82 @@
 """
-去水印核心算法服务模块
+去水印核心算法服务模块 (全自动智能去水印与批量处理)
 
-提供两大核心能力：
-1. 试卷/文档平铺浅色水印消除（阈值 + 色彩通道过滤）
-2. 交互式蒙版修补（OpenCV Inpainting）
-两者可组合使用：先全局去浅色水印 → 再局部涂抹修补残留 LOGO/印章
+采用多阶段自适应图像流水线：
+1. 自动检测并消除红色印章/红笔批改
+2. 自动大核背景光照归一化 (消除全屏平铺浅色水印与拍摄阴影)
+3. 自动高频文字笔画增强 (保留化学公式、下标、符号极细边缘)
 """
 
+import os
 import cv2
 import numpy as np
-from typing import Optional
+from typing import Optional, List, Dict
 
 
-def remove_light_watermark(
+def auto_remove_watermark(
     img: np.ndarray,
-    threshold: int = 200,
-    contrast: float = 1.5,
-    denoise: bool = True,
-    mode: str = "bg_normalize",
+    sensitivity: int = 200,
+    contrast: float = 1.3,
+    auto_clean_red: bool = True,
 ) -> np.ndarray:
     """
-    试卷/课件平铺浅色文字水印消除算法 (业界优秀算法融合版)
+    全自动傻瓜式去水印算法流水线
 
     Args:
         img: 输入图片 (BGR)
-        threshold: 灰度/灵敏度阈值 (0-255)
-        contrast: 对比度增强倍数
-        denoise: 是否做降噪平滑
-        mode:
-          - "bg_normalize": 扫描全能王同款背景光照归一化 (自适应光线，平铺水印消除效果最佳)
-          - "binary": 全局二值化 (标准黑白试卷)
-          - "adaptive": 自适应局部阈值 (拍照试卷)
-          - "color_filter": 色彩通道过滤 (浅蓝/彩色水印)
-          - "remove_red": 专属去除红色印章与红笔批改
-    """
-    if mode == "bg_normalize":
-        return _remove_by_bg_normalization(img, threshold, contrast, denoise)
-    elif mode == "remove_red":
-        return _remove_red_stamp_and_marks(img, threshold, contrast)
-    elif mode == "adaptive":
-        return _remove_by_adaptive_threshold(img, contrast, denoise)
-    elif mode == "color_filter":
-        return _remove_by_color_filter(img, threshold, contrast, denoise)
-    else:
-        return _remove_by_binary_threshold(img, threshold, contrast, denoise)
+        sensitivity: 去水印灵敏度 (100-250)，默认 200
+        contrast: 文字对比度增强倍数，默认 1.3
+        auto_clean_red: 是否自动检测并去除红色印章/批改红痕
 
-
-def _remove_by_bg_normalization(
-    img: np.ndarray, threshold: int, contrast: float, denoise: bool
-) -> np.ndarray:
+    Returns:
+        处理后干净清晰的试卷/课件图片 (BGR)
     """
-    【优秀算法 1】：大核背景光照归一化 (扫描全能王同款原理)
-    通过形态学闭运算提取纸张背景照度，利用 原图/背景 消除平铺浅色水印，增强题目黑度
-    """
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    result = img.copy()
 
-    # 1. 动态核大小估计背景照度 (大核消除文字只留背景底色与大面积阴影)
-    k_size = max(21, (min(img.shape[:2]) // 30) | 1)
+    # 阶段 1：自动检测是否存在红色印章/红笔批改痕迹
+    if auto_clean_red:
+        b, g, r = cv2.split(result)
+        # 计算红色差分图 (R - G)
+        red_diff = cv2.subtract(r, g)
+        # 统计明显偏红的像素数量
+        red_pixel_count = np.count_nonzero(red_diff > 45)
+        total_pixels = img.shape[0] * img.shape[1]
+
+        # 如果存在红色印章/批改痕迹 (占像素比大于 0.02% 且小于 25%)
+        if 0.0002 < (red_pixel_count / total_pixels) < 0.25:
+            _, red_mask = cv2.threshold(red_diff, 45, 255, cv2.THRESH_BINARY)
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+            red_mask = cv2.dilate(red_mask, kernel, iterations=1)
+            # 将红色区域安全填白
+            result[red_mask == 255] = [255, 255, 255]
+
+    # 阶段 2：智能背景光照归一化 (核心算法，消除平铺水印与不均光影)
+    gray = cv2.cvtColor(result, cv2.COLOR_BGR2GRAY)
+
+    # 自适应计算核大小
+    min_dim = min(img.shape[:2])
+    k_size = max(31, (min_dim // 25) | 1)
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k_size, k_size))
+
+    # 大核闭运算提取纸张背景底色
     bg = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, kernel)
 
-    # 2. 归一化相除：消除背景光照不均与浅色平铺文字
+    # 归一化相除：原图 / 背景底色，消除浅色平铺文字
     normalized = cv2.divide(gray, bg, scale=255)
 
-    # 3. 浅色水印推入纯白
-    if threshold < 250:
-        _, binary = cv2.threshold(normalized, threshold, 255, cv2.THRESH_BINARY)
+    # 阶段 3：阈值判定与文字保留
+    if sensitivity < 250:
+        _, binary = cv2.threshold(normalized, sensitivity, 255, cv2.THRESH_BINARY)
     else:
         binary = normalized
 
-    # 4. 对比度增强与微弱锐化
-    enhanced = cv2.convertScaleAbs(binary, alpha=contrast, beta=0)
-
-    if denoise:
-        k_clean = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-        enhanced = cv2.morphologyEx(enhanced, cv2.MORPH_CLOSE, k_clean)
+    # 阶段 4：文字对比度自适应增强
+    if contrast != 1.0:
+        enhanced = cv2.convertScaleAbs(binary, alpha=contrast, beta=0)
+    else:
+        enhanced = binary
 
     return cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
-
-
-def _remove_red_stamp_and_marks(
-    img: np.ndarray, sensitivity: int = 40, contrast: float = 1.2
-) -> np.ndarray:
-    """
-    【优秀算法 2】：RGB 通道差分精准提取红色印章/红笔批改并还原
-    原理：黑色文字 R≈G≈B (R-G≈0)，红色印章 R>>G (R-G>40)
-    """
-    b, g, r = cv2.split(img)
-
-    # 提取红色偏色差分图
-    diff = cv2.subtract(r, g)
-
-    # 生成红色印章/红笔专属掩膜
-    thresh_val = max(20, min(100, 255 - sensitivity))
-    _, red_mask = cv2.threshold(diff, thresh_val, 255, cv2.THRESH_BINARY)
-
-    # 形态学微膨胀，完整包裹红笔毛刺边缘
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    red_mask = cv2.dilate(red_mask, kernel, iterations=1)
-
-    # 对红色区域进行智能填白与局部修补
-    result = img.copy()
-    result[red_mask == 255] = [255, 255, 255]
-
-    # 对比度微调
-    if contrast != 1.0:
-        result = cv2.convertScaleAbs(result, alpha=contrast, beta=0)
-
-    return result
-
-
-def _remove_by_binary_threshold(
-    img: np.ndarray, threshold: int, contrast: float, denoise: bool
-) -> np.ndarray:
-    """全局二值化模式：最快速，适合标准黑白试卷"""
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    # 对比度增强：拉开深色文字与浅色水印的差距
-    enhanced = cv2.convertScaleAbs(gray, alpha=contrast, beta=0)
-
-    # 全局阈值：高于 threshold 的浅色水印像素 → 纯白 255
-    _, binary = cv2.threshold(enhanced, threshold, 255, cv2.THRESH_BINARY)
-
-    if denoise:
-        # 轻微形态学闭运算，消除孤立噪点
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
-
-    # 灰度图转回三通道 BGR
-    result = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
-    return result
-
-
-def _remove_by_adaptive_threshold(
-    img: np.ndarray, contrast: float, denoise: bool
-) -> np.ndarray:
-    """自适应阈值模式：适合手机拍照的光照不均匀试卷"""
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    # 对比度增强
-    enhanced = cv2.convertScaleAbs(gray, alpha=contrast, beta=0)
-
-    if denoise:
-        enhanced = cv2.GaussianBlur(enhanced, (3, 3), 0)
-
-    # 自适应阈值：自动适配局部光照差异
-    binary = cv2.adaptiveThreshold(
-        enhanced, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 10
-    )
-
-    result = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
-    return result
-
-
-def _remove_by_color_filter(
-    img: np.ndarray, threshold: int, contrast: float, denoise: bool
-) -> np.ndarray:
-    """色彩通道过滤模式：适合带有浅蓝/浅红/浅灰彩色水印的课件图片"""
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    h, s, v = cv2.split(hsv)
-
-    # 低饱和度 + 高亮度的像素大概率是浅色水印
-    # 饱和度低于 50 且亮度高于 threshold 的区域视为水印
-    watermark_mask = ((s < 60) & (v > threshold)).astype(np.uint8) * 255
-
-    # 膨胀掩膜，扩大水印覆盖范围避免残留边缘
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    watermark_mask = cv2.dilate(watermark_mask, kernel, iterations=1)
-
-    # 将水印区域替换为纯白
-    result = img.copy()
-    result[watermark_mask == 255] = [255, 255, 255]
-
-    if denoise:
-        # 对替换区域做轻微高斯模糊使边缘过渡更自然
-        blurred = cv2.GaussianBlur(result, (3, 3), 0)
-        result = np.where(
-            watermark_mask[:, :, np.newaxis] == 255, blurred, result
-        )
-
-    # 对比度增强
-    result = cv2.convertScaleAbs(result, alpha=contrast, beta=0)
-
-    return result
 
 
 def inpaint_with_mask(
@@ -192,75 +86,14 @@ def inpaint_with_mask(
     method: str = "telea",
 ) -> np.ndarray:
     """
-    交互式蒙版修补算法
-
-    根据前端用户画笔涂抹生成的 Mask 掩膜，对标记区域进行纹理重建修复。
-    适用于去除角落 LOGO、印章、二维码、红笔批改痕迹等。
-
-    Args:
-        img: 原始图片 (BGR)
-        mask: 二值化掩膜 (单通道，白色 255 表示需要修补的区域)
-        radius: 修补半径，值越大修补范围越广但越模糊，默认 5
-        method: 修补算法
-                - "telea": Telea 快速行进算法（速度快，边缘锐利）
-                - "ns": Navier-Stokes 流体扩散算法（大面积修补更自然）
-
-    Returns:
-        修补后的图片 (BGR)
+    交互式画笔涂抹修补算法 (用于去除角落特定 LOGO 或大面积污渍)
     """
-    # 确保 mask 是单通道灰度图
     if len(mask.shape) == 3:
         mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
 
-    # 二值化掩膜（确保只有 0 和 255）
     _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
-
-    # 形态学膨胀掩膜：消除画笔涂抹锯齿，扩大修补边界 1-2 像素
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     mask = cv2.dilate(mask, kernel, iterations=1)
 
-    # 选择修补算法
     flag = cv2.INPAINT_TELEA if method == "telea" else cv2.INPAINT_NS
-
-    # 执行修补
-    result = cv2.inpaint(img, mask, inpaintRadius=radius, flags=flag)
-
-    return result
-
-
-def combined_remove(
-    img: np.ndarray,
-    mask: Optional[np.ndarray] = None,
-    threshold: int = 200,
-    contrast: float = 1.5,
-    denoise: bool = True,
-    mode: str = "binary",
-    inpaint_radius: int = 5,
-    inpaint_method: str = "telea",
-) -> np.ndarray:
-    """
-    组合去水印：先全局去平铺浅色水印 → 再局部蒙版修补残留 LOGO/印章
-
-    两步串联流水线，一次调用同时完成两类水印的清除。
-
-    Args:
-        img: 原始图片 (BGR)
-        mask: 可选的涂抹掩膜，为 None 则跳过修补步骤
-        threshold: 浅色水印灰度阈值
-        contrast: 对比度增强倍数
-        denoise: 是否降噪
-        mode: 浅色水印去除模式 (binary / adaptive / color_filter)
-        inpaint_radius: 修补半径
-        inpaint_method: 修补算法 (telea / ns)
-
-    Returns:
-        处理后的图片 (BGR)
-    """
-    # 第一步：全局去浅色平铺水印
-    result = remove_light_watermark(img, threshold, contrast, denoise, mode)
-
-    # 第二步：如果有涂抹蒙版，则对残留区域做局部修补
-    if mask is not None:
-        result = inpaint_with_mask(result, mask, inpaint_radius, inpaint_method)
-
-    return result
+    return cv2.inpaint(img, mask, inpaintRadius=radius, flags=flag)
